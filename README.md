@@ -1,9 +1,3 @@
-<p align="center">
-  <img src="docs/icon-rounded.png" alt="Claude Code Discord Controller" width="120">
-</p>
-
-# Claude Code Discord Controller
-
 > 🔀 **自用 Fork** | 基于 [chadingTV/claudecode-discord](https://github.com/chadingTV/claudecode-discord)
 >
 > 新增功能：
@@ -12,6 +6,10 @@
 > - 多模型 Provider 支持
 
 ---
+
+<p align="center">
+  <img src="docs/icon-rounded.png" alt="Claude Code Discord Controller" width="120">
+</p>
 
 # Claude Code Discord Controller
 
