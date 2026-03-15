@@ -10,6 +10,7 @@ import os from "node:os";
 import readline from "node:readline";
 import { getProject, getSession, upsertSession } from "../../db/database.js";
 import { L } from "../../utils/i18n.js";
+import { getProviderDisplayName } from "../../providers/index.js";
 
 interface SessionInfo {
   sessionId: string;
@@ -229,9 +230,209 @@ async function listSessions(projectPath: string): Promise<SessionInfo[]> {
   return sessions;
 }
 
+/**
+ * Read the first user message from a Codex session JSONL file.
+ */
+async function getCodexFirstMessage(filePath: string): Promise<{ text: string; timestamp: string }> {
+  const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  let timestamp = "";
+  let text = "";
+
+  for await (const line of rl) {
+    try {
+      const entry = JSON.parse(line);
+
+      // Grab timestamp from session_meta
+      if (!timestamp && entry.type === "session_meta" && entry.payload?.timestamp) {
+        timestamp = entry.payload.timestamp;
+      }
+
+      // Best option: event_msg with type="user_message" (actual user input)
+      if (entry.type === "event_msg" && entry.payload?.type === "user_message" && entry.payload?.message) {
+        const msg = entry.payload.message;
+        if (typeof msg === "string" && msg.trim()) {
+          text = msg;
+          break;
+        }
+      }
+
+      // Second option: response_item with role="user" and short content (not AGENTS.md)
+      if (!text && entry.type === "response_item" && entry.payload?.role === "user") {
+        const content = entry.payload.content;
+        if (Array.isArray(content) && content.length > 0) {
+          for (const block of content) {
+            if (block.type === "input_text" && block.text) {
+              // Skip if it looks like AGENTS.md (starts with # or contains skill instructions)
+              if (block.text.startsWith("#") || block.text.includes("AGENTS.md") || block.text.includes("skill-creator")) {
+                continue;
+              }
+              // Must be short (actual user message, not instructions)
+              if (block.text.length < 500) {
+                text = block.text;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Third option: turn_context summary (rarely has actual user message)
+      if (!text && entry.type === "turn_context" && entry.payload?.summary) {
+        const summary = entry.payload.summary;
+        if (summary && summary !== "none" && summary.trim()) {
+          text = summary;
+          break;
+        }
+      }
+    } catch {
+      // skip malformed lines
+    }
+  }
+
+  rl.close();
+  stream.destroy();
+
+  return { text: text || "(empty session)", timestamp };
+}
+
+/**
+ * Check if a Codex session belongs to a specific project path.
+ * Reads the events.jsonl to find the working_directory.
+ */
+async function getCodexSessionProjectPath(eventsFile: string): Promise<string | null> {
+  const stream = fs.createReadStream(eventsFile, { encoding: "utf-8" });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  let projectPath: string | null = null;
+
+  for await (const line of rl) {
+    try {
+      const entry = JSON.parse(line);
+      // Codex stores working directory in session_meta payload
+      // Field name could be cwd or working_directory depending on version
+      if (entry.type === "session_meta" && entry.payload) {
+        const cwd = entry.payload.cwd || entry.payload.working_directory;
+        if (cwd) {
+          projectPath = cwd;
+          break;
+        }
+      }
+      // Fallback: check turn_context payload
+      if (entry.type === "turn_context" && entry.payload) {
+        const cwd = entry.payload.cwd || entry.payload.working_directory;
+        if (cwd) {
+          projectPath = cwd;
+          break;
+        }
+      }
+    } catch {
+      // skip malformed lines
+    }
+  }
+
+  rl.close();
+  stream.destroy();
+
+  return projectPath;
+}
+
+/**
+ * Recursively find all Codex session JSONL files in a directory.
+ * Codex files are named like: rollout-2026-03-15T02-42-48-<uuid>.jsonl
+ */
+function findAllCodexSessionFiles(dir: string): string[] {
+  const results: string[] = [];
+
+  function recurse(currentDir: string) {
+    if (!fs.existsSync(currentDir)) return;
+
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+
+      if (entry.isDirectory()) {
+        recurse(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        results.push(fullPath);
+      }
+    }
+  }
+
+  recurse(dir);
+  return results;
+}
+
+/**
+ * List all Codex sessions for a given project path.
+ * Codex stores sessions in ~/.codex/sessions/<date>/<thread-id>/events.jsonl
+ */
+async function listCodexSessions(projectPath: string): Promise<SessionInfo[]> {
+  const codexDir = path.join(os.homedir(), ".codex", "sessions");
+  if (!fs.existsSync(codexDir)) return [];
+
+  const sessions: SessionInfo[] = [];
+
+  // Find all .jsonl files recursively
+  const allSessionFiles = findAllCodexSessionFiles(codexDir);
+
+  for (const sessionFile of allSessionFiles) {
+    const stat = fs.statSync(sessionFile);
+
+    // Skip very small files (likely empty/abandoned sessions)
+    if (stat.size < 512) continue;
+
+    // Check if this session belongs to the project
+    const sessionProjectPath = await getCodexSessionProjectPath(sessionFile);
+    if (!sessionProjectPath) continue;
+    // Normalize paths for comparison (remove trailing slashes, resolve . and ..)
+    const normalizedSessionPath = path.normalize(sessionProjectPath);
+    const normalizedProjectPath = path.normalize(projectPath);
+    if (normalizedSessionPath !== normalizedProjectPath) continue;
+
+    const { text } = await getCodexFirstMessage(sessionFile);
+
+    // Skip sessions with no actual user message
+    if (text === "(empty session)") continue;
+
+    // Extract session ID from filename: rollout-2026-03-15T02-42-48-<uuid>.jsonl
+    // The UUID is the last part of the filename
+    const filename = path.basename(sessionFile, ".jsonl");
+    const uuidMatch = filename.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i);
+    const sessionId = uuidMatch ? uuidMatch[0] : filename;
+
+    // If text is "none" or empty, try to extract date from filename as display name
+    // Filename format: rollout-2026-03-15T02-42-48-<uuid>.jsonl
+    let displayText = text;
+    if (!text || text === "none" || text.trim() === "") {
+      const dateMatch = filename.match(/(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+      if (dateMatch) {
+        const [, date, hour, min] = dateMatch;
+        displayText = `Session ${date} ${hour}:${min}`;
+      } else {
+        displayText = `Session ${sessionId.slice(0, 8)}`;
+      }
+    }
+
+    sessions.push({
+      sessionId,
+      firstMessage: displayText.slice(0, 80),
+      timestamp: stat.mtime.toISOString(),
+      fileSize: stat.size,
+    });
+  }
+
+  // Sort by most recent first
+  sessions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  return sessions;
+}
+
 export const data = new SlashCommandBuilder()
   .setName("sessions")
-  .setDescription("List and resume existing Claude Code sessions for this project");
+  .setDescription("List and resume existing AI sessions for this project");
 
 export async function execute(
   interaction: ChatInputCommandInteraction,
@@ -246,7 +447,13 @@ export async function execute(
     return;
   }
 
-  const sessions = await listSessions(project.project_path);
+  const provider = project.provider ?? "claude";
+  const providerDisplay = getProviderDisplayName(provider);
+
+  // Use appropriate session listing based on provider
+  const sessions = provider === "codex"
+    ? await listCodexSessions(project.project_path)
+    : await listSessions(project.project_path);
 
   if (sessions.length === 0) {
     const { randomUUID } = await import("node:crypto");
@@ -321,9 +528,10 @@ export async function execute(
   await interaction.editReply({
     embeds: [
       {
-        title: L("Claude Code Sessions", "Claude Code 세션"),
+        title: L(`${providerDisplay} Sessions`, `${providerDisplay} 세션`),
         description: [
           `Project: \`${project.project_path}\``,
+          `Provider: **${providerDisplay}**`,
           L(`Found **${sessions.length}** session(s)`, `**${sessions.length}**개의 세션을 찾았습니다`),
           "",
           L("Select a session below to resume or delete it.", "아래에서 세션을 선택하여 재개하거나 삭제하세요."),

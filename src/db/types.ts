@@ -1,10 +1,14 @@
 export type SessionStatus = "online" | "offline" | "waiting" | "idle";
 
+export type AgentMode = "default" | "plan";
+
 export interface Project {
   channel_id: string;
   project_path: string;
   guild_id: string;
   auto_approve: number; // 0 or 1
+  provider: "claude" | "codex";
+  mode: AgentMode;
   created_at: string;
 }
 

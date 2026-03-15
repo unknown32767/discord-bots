@@ -10,6 +10,7 @@ import { registerProject, getProject } from "../../db/database.js";
 import { validateProjectPath } from "../../security/guard.js";
 import { getConfig } from "../../utils/config.js";
 import { L } from "../../utils/i18n.js";
+import { isValidProvider } from "../../providers/index.js";
 
 export const data = new SlashCommandBuilder()
   .setName("register")
@@ -21,13 +22,30 @@ export const data = new SlashCommandBuilder()
       .setRequired(true)
       .setAutocomplete(true),
   )
+  .addStringOption((opt) =>
+    opt
+      .setName("provider")
+      .setDescription("AI provider to use (default: claude)")
+      .setRequired(false)
+      .addChoices(
+        { name: "Claude", value: "claude" },
+        { name: "Codex", value: "codex" },
+      ),
+  )
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   const input = interaction.options.getString("path", true);
+  const providerInput = interaction.options.getString("provider");
   const config = getConfig();
+
+  // Determine provider: use provided value, or fall back to default config
+  const provider = isValidProvider(providerInput ?? "")
+    ? providerInput!
+    : config.DEFAULT_PROVIDER;
+
   // If input is absolute path, use as-is; otherwise join with base dir
   const projectPath = path.isAbsolute(input)
     ? input
@@ -66,7 +84,9 @@ export async function execute(
     return;
   }
 
-  registerProject(channelId, projectPath, guildId);
+  registerProject(channelId, projectPath, guildId, provider);
+
+  const providerDisplay = provider === "claude" ? "Claude" : "Codex";
 
   await interaction.editReply({
     embeds: [
@@ -77,6 +97,8 @@ export async function execute(
         fields: [
           { name: L("Status", "상태"), value: L("🔴 Offline", "🔴 오프라인"), inline: true },
           { name: L("Auto-approve", "자동 승인"), value: L("Off", "꺼짐"), inline: true },
+          { name: L("AI Provider", "AI 제공자"), value: providerDisplay, inline: true },
+          { name: L("Mode", "모드"), value: "⚡ Default", inline: true },
         ],
       },
     ],

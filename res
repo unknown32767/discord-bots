@@ -1,0 +1,1 @@
+Environment=HOME=/home/admin PATH=/usr/bin:/home/admin/.local/bin:/home/admin/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin NODE_PATH=/usr/bin ANTHROPIC_API_KEY=sk-kimi-0wd4915Ab5uvkOmfZ1dPACGcDbkyxhoH3dZeU8fcfjEMkCqIvOjKNJd3tErRnT2D ANTHROPIC_BASE_URL=https://api.kimi.com/coding/

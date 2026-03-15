@@ -13,6 +13,8 @@ describe("config", () => {
     // Clear optional vars to use defaults
     delete process.env.RATE_LIMIT_PER_MINUTE;
     delete process.env.SHOW_COST;
+    delete process.env.DEFAULT_PROVIDER;
+    delete process.env.OPENAI_API_KEY;
   });
 
   afterEach(() => {
@@ -33,6 +35,7 @@ describe("config", () => {
     const config = loadConfig();
     expect(config.RATE_LIMIT_PER_MINUTE).toBe(10);
     expect(config.SHOW_COST).toBe(true);
+    expect(config.DEFAULT_PROVIDER).toBe("claude");
   });
 
   it("parses ALLOWED_USER_IDS with spaces", async () => {
@@ -54,6 +57,23 @@ describe("config", () => {
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
     expect(config.SHOW_COST).toBe(false);
+  });
+
+  it("parses DEFAULT_PROVIDER", async () => {
+    process.env.DEFAULT_PROVIDER = "codex";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.DEFAULT_PROVIDER).toBe("codex");
+  });
+
+  it("rejects invalid DEFAULT_PROVIDER", async () => {
+    process.env.DEFAULT_PROVIDER = "invalid";
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit called");
+    });
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("process.exit called");
+    exitSpy.mockRestore();
   });
 
   it("calls process.exit(1) when required env vars are missing", async () => {

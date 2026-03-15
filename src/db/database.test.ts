@@ -19,6 +19,7 @@ import {
   getProject,
   getAllProjects,
   setAutoApprove,
+  setProvider,
   upsertSession,
   getSession,
   updateSessionStatus,
@@ -40,6 +41,7 @@ describe("database", () => {
       expect(project!.project_path).toBe("/path/to/project");
       expect(project!.guild_id).toBe("guild1");
       expect(project!.auto_approve).toBe(0);
+      expect(project!.provider).toBe("claude");
     });
 
     it("registerProject with same channelId replaces existing", () => {
@@ -79,6 +81,22 @@ describe("database", () => {
 
       setAutoApprove("ch1", false);
       expect(getProject("ch1")!.auto_approve).toBe(0);
+    });
+
+    it("setProvider changes provider", () => {
+      registerProject("ch1", "/p1", "guild1");
+      expect(getProject("ch1")!.provider).toBe("claude");
+
+      setProvider("ch1", "codex");
+      expect(getProject("ch1")!.provider).toBe("codex");
+
+      setProvider("ch1", "claude");
+      expect(getProject("ch1")!.provider).toBe("claude");
+    });
+
+    it("registerProject with custom provider", () => {
+      registerProject("ch1", "/p1", "guild1", "codex");
+      expect(getProject("ch1")!.provider).toBe("codex");
     });
   });
 

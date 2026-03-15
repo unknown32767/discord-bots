@@ -7,6 +7,8 @@ import {
 } from "discord.js";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import readline from "node:readline";
 import { isAllowedUser } from "../../security/guard.js";
 import { sessionManager } from "../../claude/session-manager.js";
 import { upsertSession, getProject, getSession } from "../../db/database.js";
@@ -264,39 +266,91 @@ export async function handleButtonInteraction(
       return;
     }
 
-    const sessionDir = findSessionDir(project.project_path);
-    if (sessionDir) {
-      const filePath = path.join(sessionDir, `${sessionId}.jsonl`);
-      try {
-        fs.unlinkSync(filePath);
+    const provider = project.provider ?? "claude";
+    let deleted = false;
 
-        // If deleting the currently active session, reset DB so next message creates fresh session
-        const dbSession = getSession(channelId);
-        if (dbSession?.session_id === sessionId) {
-          const { randomUUID } = await import("node:crypto");
-          upsertSession(randomUUID(), channelId, null, "idle");
+    if (provider === "codex") {
+      // Delete Codex session file (find recursively by UUID in filename)
+      const codexDir = path.join(os.homedir(), ".codex", "sessions");
+      if (fs.existsSync(codexDir)) {
+        // Search for session file recursively
+        function findSessionFileRecursive(dir: string, targetId: string): string | null {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              const found = findSessionFileRecursive(fullPath, targetId);
+              if (found) return found;
+            } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+              // Check if filename contains the UUID
+              if (entry.name.includes(targetId)) {
+                return fullPath;
+              }
+            }
+          }
+          return null;
         }
-
-        await interaction.update({
-          embeds: [
-            {
-              title: L("Session Deleted", "세션 삭제됨"),
-              description: L(
-                `Session \`${sessionId.slice(0, 8)}...\` has been deleted.\nYour next message will start a new conversation.`,
-                `세션 \`${sessionId.slice(0, 8)}...\`이(가) 삭제되었습니다.\n다음 메시지부터 새로운 대화가 시작됩니다.`
-              ),
-              color: 0xff6b6b,
-            },
-          ],
-          components: [],
-        });
-      } catch {
-        await interaction.update({
-          content: L("Failed to delete session file.", "세션 파일 삭제에 실패했습니다."),
-          embeds: [],
-          components: [],
-        });
+        const sessionFile = findSessionFileRecursive(codexDir, sessionId);
+        if (sessionFile) {
+          try {
+            fs.unlinkSync(sessionFile);
+            deleted = true;
+          } catch {
+            // failed to delete
+          }
+        }
       }
+    } else {
+      // Delete Claude session file
+      const sessionDir = findSessionDir(project.project_path);
+      if (sessionDir) {
+        const filePath = path.join(sessionDir, `${sessionId}.jsonl`);
+        try {
+          fs.unlinkSync(filePath);
+          deleted = true;
+        } catch {
+          // failed to delete
+        }
+      }
+    }
+
+    if (deleted) {
+      // Check if deleting the currently active session
+      const dbSession = getSession(channelId);
+      const isActiveSession = dbSession?.session_id === sessionId;
+
+      // If deleting current session, reset DB so next message creates fresh session
+      if (isActiveSession) {
+        const { randomUUID } = await import("node:crypto");
+        upsertSession(randomUUID(), channelId, null, "idle");
+      }
+
+      const description = isActiveSession
+        ? L(
+            `Session \`${sessionId.slice(0, 8)}...\` has been deleted.\nYour next message will start a new conversation.`,
+            `세션 \`${sessionId.slice(0, 8)}...\`이(가) 삭제되었습니다.\n다음 메시지부터 새로운 대화가 시작됩니다.`
+          )
+        : L(
+            `Session \`${sessionId.slice(0, 8)}...\` has been deleted.`,
+            `세션 \`${sessionId.slice(0, 8)}...\`이(가) 삭제되었습니다.`
+          );
+
+      await interaction.update({
+        embeds: [
+          {
+            title: L("Session Deleted", "세션 삭제됨"),
+            description,
+            color: 0xff6b6b,
+          },
+        ],
+        components: [],
+      });
+    } else {
+      await interaction.update({
+        content: L("Failed to delete session.", "세션 삭제에 실패했습니다."),
+        embeds: [],
+        components: [],
+      });
     }
     return;
   }
@@ -399,13 +453,45 @@ export async function handleSelectMenuInteraction(
     const project = getProject(channelId);
     let lastMessage = "";
     if (project) {
-      const sessionDir = findSessionDir(project.project_path);
-      if (sessionDir) {
-        const filePath = path.join(sessionDir, `${selectedSessionId}.jsonl`);
-        try {
-          lastMessage = await getLastAssistantMessage(filePath);
-        } catch {
-          // ignore
+      const provider = project.provider ?? "claude";
+
+      if (provider === "codex") {
+        // Read Codex session - find recursively by UUID in filename
+        const codexDir = path.join(os.homedir(), ".codex", "sessions");
+        function findSessionFile(dir: string, targetId: string): string | null {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              const found = findSessionFile(fullPath, targetId);
+              if (found) return found;
+            } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+              // Check if filename contains the UUID
+              if (entry.name.includes(targetId)) {
+                return fullPath;
+              }
+            }
+          }
+          return null;
+        }
+        const codexFile = findSessionFile(codexDir, selectedSessionId);
+        if (codexFile) {
+          try {
+            lastMessage = await getCodexLastMessage(codexFile);
+          } catch {
+            // ignore
+          }
+        }
+      } else {
+        // Read Claude session
+        const sessionDir = findSessionDir(project.project_path);
+        if (sessionDir) {
+          const filePath = path.join(sessionDir, `${selectedSessionId}.jsonl`);
+          try {
+            lastMessage = await getLastAssistantMessage(filePath);
+          } catch {
+            // ignore
+          }
         }
       }
     }
@@ -443,4 +529,33 @@ export async function handleSelectMenuInteraction(
       components: [row],
     });
   }
+}
+
+/**
+ * Read the last agent message from a Codex session events.jsonl file.
+ */
+async function getCodexLastMessage(filePath: string): Promise<string> {
+  if (!fs.existsSync(filePath)) return "(no message)";
+
+  const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  let lastText = "";
+
+  for await (const line of rl) {
+    try {
+      const entry = JSON.parse(line);
+      // Look for completed agent messages
+      if (entry.type === "item.completed" && entry.item?.type === "agent_message" && entry.item.text) {
+        lastText = entry.item.text;
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  rl.close();
+  stream.destroy();
+
+  return lastText || "(no message)";
 }

@@ -93,6 +93,13 @@ fi
 # --regen-service: systemd service 파일만 재생성
 if [ "$1" = "--regen-service" ]; then
     mkdir -p "$HOME/.config/systemd/user"
+    # Load env vars from .env file for persistence across reboots
+    ENV_API_KEY=""
+    ENV_BASE_URL=""
+    if [ -f "$ENV_FILE" ]; then
+	    ENV_API_KEY=$(grep "^ANTHROPIC_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+	    ENV_BASE_URL=$(grep "^ANTHROPIC_BASE_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+    fi
     cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=Claude Discord Bot
@@ -103,6 +110,8 @@ WorkingDirectory=$SCRIPT_DIR
 Environment=HOME=$HOME
 Environment=PATH=$(dirname "$NODE_BIN"):$PATH
 Environment=NODE_PATH=$(dirname "$NODE_BIN")
+${ENV_API_KEY:+Environment=ANTHROPIC_API_KEY=$ENV_API_KEY}
+${ENV_BASE_URL:+Environment=ANTHROPIC_BASE_URL=$ENV_BASE_URL}
 ExecStartPre=/bin/bash -c 'touch $SCRIPT_DIR/.bot.lock'
 ExecStart=$NODE_BIN $SCRIPT_DIR/dist/index.js
 ExecStopPost=/bin/bash -c 'rm -f $SCRIPT_DIR/.bot.lock'
@@ -192,6 +201,14 @@ if systemctl --user is-active "$SERVICE_NAME" &>/dev/null; then
     sleep 1
 fi
 
+# Load env vars from .env file for persistence across reboots
+ENV_API_KEY=""
+ENV_BASE_URL=""
+if [ -f "$ENV_FILE" ]; then
+	ENV_API_KEY=$(grep "^ANTHROPIC_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+	ENV_BASE_URL=$(grep "^ANTHROPIC_BASE_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+fi
+
 # Create systemd service file
 cat > "$SERVICE_FILE" << EOF
 [Unit]
@@ -203,6 +220,8 @@ WorkingDirectory=$SCRIPT_DIR
 Environment=HOME=$HOME
 Environment=PATH=$(dirname "$NODE_BIN"):$PATH
 Environment=NODE_PATH=$(dirname "$NODE_BIN")
+${ENV_API_KEY:+Environment=ANTHROPIC_API_KEY=$ENV_API_KEY}
+${ENV_BASE_URL:+Environment=ANTHROPIC_BASE_URL=$ENV_BASE_URL}
 ExecStartPre=/bin/bash -c 'touch $SCRIPT_DIR/.bot.lock'
 ExecStart=$NODE_BIN $SCRIPT_DIR/dist/index.js
 ExecStopPost=/bin/bash -c 'rm -f $SCRIPT_DIR/.bot.lock'
