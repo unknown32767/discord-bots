@@ -22,6 +22,7 @@ import {
   setProvider,
   upsertSession,
   getSession,
+  getAllSessionRecordsByChannel,
   updateSessionStatus,
   getAllSessions,
 } from "./database.js";
@@ -133,6 +134,16 @@ describe("database", () => {
       upsertSession("s1", "ch1", null, "online");
       updateSessionStatus("ch1", "waiting");
       expect(getSession("ch1")!.status).toBe("waiting");
+    });
+
+    it("getAllSessionRecordsByChannel returns all rows including null session ids", () => {
+      upsertSession("s1", "ch1", null, "online");
+      upsertSession("s2", "ch1", "sdk-2", "idle");
+
+      const sessions = getAllSessionRecordsByChannel("ch1");
+      expect(sessions).toHaveLength(2);
+      expect(sessions.some((session) => session.session_id === null)).toBe(true);
+      expect(sessions.some((session) => session.session_id === "sdk-2")).toBe(true);
     });
 
     it("getAllSessions joins with projects", () => {

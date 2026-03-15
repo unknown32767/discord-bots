@@ -64,6 +64,34 @@ export function registerProject(
   stmt.run(channelId, projectPath, guildId, provider);
 }
 
+export function registerInheritedProject(
+  channelId: string,
+  parentProject: Project,
+): boolean {
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO projects (
+      channel_id,
+      project_path,
+      guild_id,
+      auto_approve,
+      provider,
+      mode
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const result = stmt.run(
+    channelId,
+    parentProject.project_path,
+    parentProject.guild_id,
+    parentProject.auto_approve,
+    parentProject.provider,
+    parentProject.mode,
+  );
+
+  return result.changes > 0;
+}
+
 export function unregisterProject(channelId: string): void {
   db.prepare("DELETE FROM sessions WHERE channel_id = ?").run(channelId);
   db.prepare("DELETE FROM projects WHERE channel_id = ?").run(channelId);
@@ -137,6 +165,14 @@ export function getSessionsByChannel(channelId: string): Session[] {
   return db
     .prepare(
       "SELECT * FROM sessions WHERE channel_id = ? AND session_id IS NOT NULL ORDER BY created_at DESC",
+    )
+    .all(channelId) as Session[];
+}
+
+export function getAllSessionRecordsByChannel(channelId: string): Session[] {
+  return db
+    .prepare(
+      "SELECT * FROM sessions WHERE channel_id = ? ORDER BY created_at DESC",
     )
     .all(channelId) as Session[];
 }

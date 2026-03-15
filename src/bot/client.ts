@@ -1,5 +1,7 @@
 import {
+  ChannelType,
   Client,
+  Events,
   GatewayIntentBits,
   REST,
   Routes,
@@ -12,6 +14,7 @@ import { handleMessage } from "./handlers/message.js";
 import { handleButtonInteraction, handleSelectMenuInteraction } from "./handlers/interaction.js";
 import { isAllowedUser } from "../security/guard.js";
 import { L } from "../utils/i18n.js";
+import { getProject, registerInheritedProject } from "../db/database.js";
 
 // Import commands
 import * as registerCmd from "./commands/register.js";
@@ -26,8 +29,9 @@ import * as queueCmd from "./commands/queue.js";
 import * as usageCmd from "./commands/usage.js";
 import * as switchModelCmd from "./commands/switch-model.js";
 import * as modeCmd from "./commands/mode.js";
+import * as compactCmd from "./commands/compact.js";
 
-const commands = [registerCmd, unregisterCmd, statusCmd, stopCmd, autoApproveCmd, sessionsCmd, clearSessionsCmd, lastCmd, queueCmd, usageCmd, switchModelCmd, modeCmd];
+const commands = [registerCmd, unregisterCmd, statusCmd, stopCmd, autoApproveCmd, sessionsCmd, clearSessionsCmd, lastCmd, queueCmd, usageCmd, switchModelCmd, modeCmd, compactCmd];
 const commandMap = new Collection<
   string,
   { execute: (interaction: ChatInputCommandInteraction) => Promise<void> }
@@ -130,6 +134,28 @@ export async function startBot(): Promise<Client> {
       } catch {
         // ignore reply error
       }
+    }
+  });
+
+  client.on(Events.ThreadCreate, async (thread) => {
+    try {
+      if (!thread.parentId) return;
+      if (thread.parent?.type === ChannelType.GuildForum) return;
+
+      const parentProject = getProject(thread.parentId);
+      if (!parentProject) return;
+
+      const created = registerInheritedProject(thread.id, parentProject);
+      if (!created) return;
+
+      await thread.send(
+        L(
+          `This thread automatically inherited the project from <#${thread.parentId}>.\nPath: \`${parentProject.project_path}\``,
+          `이 스레드는 부모 채널 <#${thread.parentId}> 의 프로젝트 설정을 자동 상속했습니다.\n경로: \`${parentProject.project_path}\``,
+        ),
+      );
+    } catch (error) {
+      console.error("threadCreate error:", error);
     }
   });
 

@@ -13,6 +13,7 @@ import { isAllowedUser } from "../../security/guard.js";
 import { sessionManager } from "../../claude/session-manager.js";
 import { upsertSession, getProject, getSession } from "../../db/database.js";
 import { findSessionDir, getLastAssistantMessage } from "../commands/sessions.js";
+import { cancelCompactRequest, confirmCompactRequest } from "../commands/compact.js";
 import { L } from "../../utils/i18n.js";
 
 export async function handleButtonInteraction(
@@ -170,6 +171,85 @@ export async function handleButtonInteraction(
       ],
       components: [],
     });
+    return;
+  }
+
+  if (action === "compact-cancel") {
+    const result = cancelCompactRequest(requestId, interaction.user.id);
+    if (result === "forbidden") {
+      await interaction.reply({
+        content: L("Only the user who started this compact can cancel it.", "이 compact를 시작한 사용자만 취소할 수 있습니다."),
+        ephemeral: true,
+      });
+      return;
+    }
+    if (result === "missing") {
+      await interaction.reply({
+        content: L("This compact request has expired.", "이 compact 요청은 만료되었습니다."),
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.update({
+      content: L("Compact cancelled.", "Compact가 취소되었습니다."),
+      embeds: [],
+      components: [],
+    });
+    return;
+  }
+
+  if (action === "compact-confirm") {
+    const result = confirmCompactRequest(requestId, interaction.user.id);
+    if (result.status === "forbidden") {
+      await interaction.reply({
+        content: L("Only the user who started this compact can confirm it.", "이 compact를 시작한 사용자만 확인할 수 있습니다."),
+        ephemeral: true,
+      });
+      return;
+    }
+    if (result.status === "missing") {
+      await interaction.reply({
+        content: L("This compact request has expired.", "이 compact 요청은 만료되었습니다."),
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const deletedFiles = result.deletedFiles ?? [];
+    const failedFiles = result.failedFiles ?? [];
+
+    await interaction.update({
+      embeds: [
+        {
+          title: L("Compact Completed", "Compact 완료"),
+          description: [
+            L(`Deleted projects: **${result.deletedProjects ?? 0}**`, `삭제된 프로젝트: **${result.deletedProjects ?? 0}**`),
+            L(`Deleted session records: **${result.deletedSessionRecords ?? 0}**`, `삭제된 세션 레코드: **${result.deletedSessionRecords ?? 0}**`),
+            L(`Deleted session files: **${deletedFiles.length}**`, `삭제된 세션 파일: **${deletedFiles.length}**`),
+            failedFiles.length > 0
+              ? L(`Failed file deletions: **${failedFiles.length}**`, `삭제 실패한 파일: **${failedFiles.length}**`)
+              : L("Failed file deletions: **0**", "삭제 실패한 파일: **0**"),
+          ].join("\n"),
+          color: failedFiles.length > 0 ? 0xffa500 : 0x00ff00,
+        },
+      ],
+      components: [],
+    });
+
+    if (deletedFiles.length > 0) {
+      const preview = deletedFiles.map((filePath) => `- ${filePath}`).join("\n");
+      await interaction.followUp({
+        content: `Deleted files:\n\`\`\`\n${preview.slice(0, 1800)}\n\`\`\``,
+      });
+    }
+
+    if (failedFiles.length > 0) {
+      const preview = failedFiles.map((filePath) => `- ${filePath}`).join("\n");
+      await interaction.followUp({
+        content: `Failed files:\n\`\`\`\n${preview.slice(0, 1800)}\n\`\`\``,
+      });
+    }
     return;
   }
 
