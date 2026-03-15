@@ -4,6 +4,17 @@
 
 # Claude Code Discord Controller
 
+> 🔀 **自用 Fork** | 基于 [chadingTV/claudecode-discord](https://github.com/chadingTV/claudecode-discord)
+>
+> 新增功能：
+> - `/switch-model` - 切换 Claude / Codex 模型
+> - `/mode` - 切换交互模式
+> - 多模型 Provider 支持
+
+---
+
+# Claude Code Discord Controller
+
 [![CI](https://github.com/chadingTV/claudecode-discord/actions/workflows/ci.yml/badge.svg)](https://github.com/chadingTV/claudecode-discord/actions)
 
 Control Claude Code from your phone — a multi-machine agent hub via Discord.
@@ -84,7 +95,7 @@ Discord isn't just a chat app — it's a surprisingly perfect fit for controllin
 ## Installation
 
 ```bash
-git clone https://github.com/chadingTV/claudecode-discord.git
+git clone https://github.com/unknown32767/discord-bots.git
 cd claudecode-discord
 
 # macOS / Linux
@@ -148,6 +159,8 @@ claudecode-discord/
 | `/queue list` | View queued messages (cancel individually or all) | |
 | `/queue clear` | Cancel all queued messages | |
 | `/clear-sessions` | Delete all session files for the project | |
+| `/switch-model` | Switch AI model (Claude / Codex) | `/switch-model codex` |
+| `/mode` | Toggle interaction mode | `/mode` |
 
 The `/register` command shows an **autocomplete dropdown** listing subdirectories under `BASE_PROJECT_DIR` — just start typing to filter and select.
 The first option `.` registers the base directory itself. You can also type a custom path; absolute paths work too.
