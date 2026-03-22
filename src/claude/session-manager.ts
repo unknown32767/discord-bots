@@ -290,17 +290,19 @@ class SessionManager {
             lastEditTime = now;
             const chunks = splitMessage(responseBuffer);
             try {
-              await currentMessage.edit({ content: chunks[0] || "...", components: [] });
+              await currentMessage.edit({ content: chunks[0] || "...", components: [stopRow] });
               // Send additional chunks as new messages
               for (let i = 1; i < chunks.length; i++) {
-                currentMessage = await channel.send(chunks[i]);
+                const isLast = i === chunks.length - 1;
+                currentMessage = await channel.send({ content: chunks[i], components: isLast ? [stopRow] : [] });
                 responseBuffer = chunks.slice(i + 1).join("");
               }
             } catch (e) {
               console.warn(`[stream] Failed to edit message for ${channelId}, sending new:`, e instanceof Error ? e.message : e);
-              currentMessage = await channel.send(
-                chunks[chunks.length - 1] || "...",
-              );
+              currentMessage = await channel.send({
+                content: chunks[chunks.length - 1] || "...",
+                components: [stopRow],
+              });
             }
           }
           continue;
@@ -308,6 +310,20 @@ class SessionManager {
 
         // Handle result
         if (message.type === "result") {
+          // Flush any pending content in responseBuffer before completing
+          if (responseBuffer.trim()) {
+            const chunks = splitMessage(responseBuffer);
+            for (let i = 0; i < chunks.length; i++) {
+              const isLast = i === chunks.length - 1;
+              if (i === 0) {
+                await currentMessage.edit({ content: chunks[0], components: isLast ? [stopRow] : [] });
+              } else {
+                currentMessage = await channel.send({ content: chunks[i], components: isLast ? [stopRow] : [] });
+              }
+            }
+            responseBuffer = "";
+          }
+
           // Replace streaming text with completed button
           try {
             await currentMessage.edit({
