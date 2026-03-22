@@ -17,6 +17,8 @@ import {
   createResultEmbed,
   createStopButton,
   createCompletedButton,
+  createThinkingEmbed,
+  createRedactedThinkingEmbed,
   splitMessage,
   type AskQuestionData,
 } from "./output-formatter.js";
@@ -305,6 +307,20 @@ class SessionManager {
               });
             }
           }
+          continue;
+        }
+
+        // Handle thinking
+        if (message.type === "thinking") {
+          const thinkingEmbed = createThinkingEmbed(message.text);
+          await channel.send({ embeds: [thinkingEmbed] });
+          continue;
+        }
+
+        // Handle redacted thinking
+        if (message.type === "redacted_thinking") {
+          const redactedEmbed = createRedactedThinkingEmbed();
+          await channel.send({ embeds: [redactedEmbed] });
           continue;
         }
 

@@ -19,6 +19,8 @@ export interface QueryOptions {
 export type AgentMessage =
   | { type: 'init'; sessionId: string }
   | { type: 'content'; text: string }
+  | { type: 'thinking'; text: string }
+  | { type: 'redacted_thinking'; data: string }
   | { type: 'tool_start'; toolName: string; input: unknown }
   | { type: 'tool_end'; result: unknown }
   | { type: 'result'; text: string; cost?: number; durationMs?: number }

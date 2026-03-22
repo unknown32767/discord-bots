@@ -269,3 +269,20 @@ export function createResultEmbed(
 
   return embed;
 }
+
+export function createThinkingEmbed(text: string): EmbedBuilder {
+  const truncated = text.length > 4000 ? text.slice(0, 4000) + "..." : text;
+  return new EmbedBuilder()
+    .setTitle(L("💭 Reasoning", "💭 추론 과정"))
+    .setDescription(truncated)
+    .setColor(0x5865f2) // Discord Blurple
+    .setTimestamp();
+}
+
+export function createRedactedThinkingEmbed(): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle(L("💭 Reasoning", "💭 추론 과정"))
+    .setDescription(L("*[Redacted thinking block]*", "*[검연된 추론 블록]*"))
+    .setColor(0x5865f2)
+    .setTimestamp();
+}

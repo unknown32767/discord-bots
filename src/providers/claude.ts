@@ -70,6 +70,10 @@ export class ClaudeProvider implements AgentProvider {
           for (const block of content) {
             if ("text" in block && typeof block.text === "string") {
               yield { type: "content", text: block.text };
+            } else if (block.type === "thinking" && block.thinking) {
+              yield { type: "thinking", text: block.thinking };
+            } else if (block.type === "redacted_thinking" && block.data) {
+              yield { type: "redacted_thinking", data: block.data };
             }
           }
         }
