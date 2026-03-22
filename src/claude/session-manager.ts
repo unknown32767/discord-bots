@@ -284,7 +284,11 @@ class SessionManager {
         // Handle streaming text
         if (message.type === "content") {
           responseBuffer += message.text;
-          hasTextOutput = true;
+          // Only mark as text output for streaming providers (Claude)
+          // Codex sends complete text at once, shouldn't stop heartbeat
+          if (provider.name === "claude") {
+            hasTextOutput = true;
+          }
 
           // Throttled message edit
           const now = Date.now();
@@ -326,6 +330,7 @@ class SessionManager {
 
         // Handle result
         if (message.type === "result") {
+          hasTextOutput = true; // Stop heartbeat for all providers when task completes
           // Flush any pending content in responseBuffer before completing
           if (responseBuffer.trim()) {
             const chunks = splitMessage(responseBuffer);
