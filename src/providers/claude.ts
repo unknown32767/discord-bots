@@ -20,6 +20,8 @@ export class ClaudeProvider implements AgentProvider {
           ANTHROPIC_API_KEY: undefined,
           PATH: `${path.dirname(process.execPath)}:${process.env.PATH ?? ""}`,
         },
+        // Enable gstack skills
+        settingSources: ["user", "project"],
         ...(sessionId ? { resume: sessionId } : {}),
 
         canUseTool: async (
