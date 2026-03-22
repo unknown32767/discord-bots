@@ -296,7 +296,19 @@ class SessionManager {
             lastEditTime = now;
             const chunks = splitMessage(responseBuffer);
             try {
-              await currentMessage.edit({ content: chunks[0] || "...", components: [stopRow] });
+              // For non-streaming providers (Codex), keep heartbeat line at top
+              if (provider.name !== "claude") {
+                const elapsed = Math.round((Date.now() - startTime) / 1000);
+                const timeStr = elapsed > 60
+                  ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+                  : `${elapsed}s`;
+                const heartbeatLine = `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`;
+                const contentWithHeader = `${heartbeatLine}\n---\n${chunks[0]}`;
+                await currentMessage.edit({ content: contentWithHeader, components: [stopRow] });
+              } else {
+                // Claude: direct edit (streaming)
+                await currentMessage.edit({ content: chunks[0] || "...", components: [stopRow] });
+              }
               // Send additional chunks as new messages
               for (let i = 1; i < chunks.length; i++) {
                 const isLast = i === chunks.length - 1;
