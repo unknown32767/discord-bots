@@ -293,37 +293,47 @@ class SessionManager {
         // Handle streaming text
         if (message.type === "content") {
           responseBuffer += message.text;
-          // Only mark as text output for streaming providers (Claude)
-          // Codex sends complete text at once, shouldn't stop heartbeat
+
+          // Claude: mark as text output to stop heartbeat
           if (provider.name === "claude") {
             hasTextOutput = true;
           }
 
-          // Throttled message edit
           const now = Date.now();
           if (now - lastEditTime >= EDIT_INTERVAL && responseBuffer.length > 0) {
             lastEditTime = now;
             const chunks = splitMessage(responseBuffer);
+
             try {
-              // For non-streaming providers (Codex), keep heartbeat line at top
-              if (provider.name !== "claude") {
-                const elapsed = Math.round((Date.now() - startTime) / 1000);
-                const timeStr = elapsed > 60
-                  ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
-                  : `${elapsed}s`;
-                const heartbeatLine = `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`;
-                const contentWithHeader = `${heartbeatLine}\n---\n${chunks[0]}`;
-                await currentMessage.edit({ content: contentWithHeader, components: [stopRow] });
+              if (provider.name === "claude") {
+                // Claude: direct streaming display
+                for (let i = 0; i < chunks.length; i++) {
+                  const isLast = i === chunks.length - 1;
+                  if (i === 0) {
+                    await currentMessage.edit({ content: chunks[0], components: [stopRow] });
+                  } else {
+                    currentMessage = await channel.send({ content: chunks[i], components: isLast ? [stopRow] : [] });
+                  }
+                }
               } else {
-                // Claude: direct edit (streaming)
-                await currentMessage.edit({ content: chunks[0] || "...", components: [stopRow] });
+                // Codex: with heartbeat header on all chunks
+                for (let i = 0; i < chunks.length; i++) {
+                  const isLast = i === chunks.length - 1;
+                  const elapsed = Math.round((Date.now() - startTime) / 1000);
+                  const timeStr = elapsed > 60
+                    ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+                    : `${elapsed}s`;
+                  const heartbeatLine = `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`;
+                  const contentWithHeader = `${heartbeatLine}\n---\n${chunks[i]}`;
+
+                  if (i === 0) {
+                    await currentMessage.edit({ content: contentWithHeader, components: [stopRow] });
+                  } else {
+                    currentMessage = await channel.send({ content: contentWithHeader, components: isLast ? [stopRow] : [] });
+                  }
+                }
               }
-              // Send additional chunks as new messages
-              for (let i = 1; i < chunks.length; i++) {
-                const isLast = i === chunks.length - 1;
-                currentMessage = await channel.send({ content: chunks[i], components: isLast ? [stopRow] : [] });
-                responseBuffer = chunks.slice(i + 1).join("");
-              }
+              responseBuffer = "";
             } catch (e) {
               console.warn(`[stream] Failed to edit message for ${channelId}, sending new:`, e instanceof Error ? e.message : e);
               currentMessage = await channel.send({
@@ -395,10 +405,27 @@ class SessionManager {
             const chunks = splitMessage(responseBuffer);
             for (let i = 0; i < chunks.length; i++) {
               const isLast = i === chunks.length - 1;
-              if (i === 0) {
-                await currentMessage.edit({ content: chunks[0], components: isLast ? [stopRow] : [] });
+              if (provider.name === "claude") {
+                // Claude: direct content display
+                if (i === 0) {
+                  await currentMessage.edit({ content: chunks[0], components: isLast ? [stopRow] : [] });
+                } else {
+                  currentMessage = await channel.send({ content: chunks[i], components: isLast ? [stopRow] : [] });
+                }
               } else {
-                currentMessage = await channel.send({ content: chunks[i], components: isLast ? [stopRow] : [] });
+                // Codex: with heartbeat header on all chunks
+                const elapsed = Math.round((Date.now() - startTime) / 1000);
+                const timeStr = elapsed > 60
+                  ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+                  : `${elapsed}s`;
+                const heartbeatLine = `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`;
+                const contentWithHeader = `${heartbeatLine}\n---\n${chunks[i]}`;
+
+                if (i === 0) {
+                  await currentMessage.edit({ content: contentWithHeader, components: isLast ? [stopRow] : [] });
+                } else {
+                  currentMessage = await channel.send({ content: contentWithHeader, components: isLast ? [stopRow] : [] });
+                }
               }
             }
             responseBuffer = "";
