@@ -99,14 +99,23 @@ class SessionManager {
     const heartbeatInterval = setInterval(async () => {
       if (hasTextOutput) return; // stop heartbeat once real content is streaming
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const mins = Math.floor(elapsed / 60);
-      const secs = elapsed % 60;
-      const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      const timeStr = elapsed > 60
+        ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+        : `${elapsed}s`;
+
       try {
-        await currentMessage.edit({
-          content: `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`,
-          components: [stopRow],
-        });
+        // If there's pending content in buffer, include it (for Codex)
+        if (responseBuffer.trim()) {
+          const heartbeatLine = `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`;
+          const contentWithHeader = `${heartbeatLine}\n---\n${responseBuffer.slice(0, 1800)}`;
+          await currentMessage.edit({ content: contentWithHeader, components: [stopRow] });
+        } else {
+          // No content yet, show heartbeat only
+          await currentMessage.edit({
+            content: `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`,
+            components: [stopRow],
+          });
+        }
       } catch (e) {
         console.warn(`[heartbeat] Failed to edit message for ${channelId}:`, e instanceof Error ? e.message : e);
       }
