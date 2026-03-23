@@ -104,7 +104,7 @@ class SessionManager {
       const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
       try {
         await currentMessage.edit({
-          content: `⏳ ${lastActivity} (${timeStr})`,
+          content: `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`,
           components: [stopRow],
         });
       } catch (e) {
@@ -321,6 +321,44 @@ class SessionManager {
                 content: chunks[chunks.length - 1] || "...",
                 components: [stopRow],
               });
+            }
+          }
+          continue;
+        }
+
+        // Handle tool start - update activity for both Claude and Codex
+        if (message.type === "tool_start") {
+          toolUseCount++;
+          const toolLabels: Record<string, string> = {
+            Read: L("Reading files", "파일 읽는 중"),
+            Glob: L("Searching files", "파일 검색 중"),
+            Grep: L("Searching code", "코드 검색 중"),
+            Write: L("Writing file", "파일 작성 중"),
+            Edit: L("Editing file", "파일 편집 중"),
+            Bash: L("Running command", "명령어 실행 중"),
+            WebSearch: L("Searching web", "웹 검색 중"),
+            WebFetch: L("Fetching URL", "URL 가져오는 중"),
+            TodoWrite: L("Updating tasks", "작업 업데이트 중"),
+          };
+          const input = message.input as Record<string, unknown> | undefined;
+          const filePath = typeof input?.file_path === "string"
+            ? ` \`${(input.file_path as string).split(/[\\/]/).pop()}\``
+            : "";
+          lastActivity = `${toolLabels[message.toolName] ?? `Using ${message.toolName}`}${filePath}`;
+
+          // Update status message if no text output yet
+          if (!hasTextOutput) {
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            const timeStr = elapsed > 60
+              ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+              : `${elapsed}s`;
+            try {
+              await currentMessage.edit({
+                content: `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`,
+                components: [stopRow],
+              });
+            } catch (e) {
+              console.warn(`[tool-start] Failed to edit message for ${channelId}:`, e instanceof Error ? e.message : e);
             }
           }
           continue;
