@@ -302,10 +302,8 @@ class SessionManager {
         if (message.type === "content") {
           responseBuffer += message.text;
 
-          // Claude: mark as text output to stop heartbeat
-          if (provider.name === "claude") {
-            hasTextOutput = true;
-          }
+          // Mark as text output to stop heartbeat status overwriting
+          hasTextOutput = true;
 
           const now = Date.now();
           if (now - lastEditTime >= EDIT_INTERVAL && responseBuffer.length > 0) {
