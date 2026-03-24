@@ -39,12 +39,14 @@ interface CodexClass {
     workingDirectory?: string;
     approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
     sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+    networkAccessEnabled?: boolean;
     [key: string]: unknown;
   }): Thread;
   resumeThread(id: string, options?: {
     workingDirectory?: string;
     approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
     sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+    networkAccessEnabled?: boolean;
     [key: string]: unknown;
   }): Thread;
 }
@@ -84,12 +86,14 @@ export class CodexProvider implements AgentProvider {
             approvalPolicy: "on-request",
             skipGitRepoCheck: true,
             sandboxMode: "workspace-write",
+            networkAccessEnabled: true,
           })
         : codex.startThread({
             workingDirectory: cwd,
             approvalPolicy: "on-request",
             skipGitRepoCheck: true,
             sandboxMode: "workspace-write",
+            networkAccessEnabled: true,
           });
 
       this.currentThread = thread;

@@ -107,7 +107,15 @@ class SessionManager {
         // If there's pending content in buffer, include it (for Codex)
         if (responseBuffer.trim()) {
           const heartbeatLine = `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`;
-          const contentWithHeader = `${heartbeatLine}\n---\n${responseBuffer.slice(0, 1800)}`;
+          const MAX_CONTENT_LENGTH = 1800; // Leave room for heartbeat header
+
+          let contentToShow = responseBuffer;
+          // Show the most recent content (tail) if too long
+          if (contentToShow.length > MAX_CONTENT_LENGTH) {
+            contentToShow = "..." + contentToShow.slice(-MAX_CONTENT_LENGTH);
+          }
+
+          const contentWithHeader = `${heartbeatLine}\n---\n${contentToShow}`;
           await currentMessage.edit({ content: contentWithHeader, components: [stopRow] });
         } else {
           // No content yet, show heartbeat only
@@ -315,25 +323,26 @@ class SessionManager {
                     currentMessage = await channel.send({ content: chunks[i], components: isLast ? [stopRow] : [] });
                   }
                 }
+                responseBuffer = "";
               } else {
-                // Codex: with heartbeat header on all chunks
-                for (let i = 0; i < chunks.length; i++) {
-                  const isLast = i === chunks.length - 1;
-                  const elapsed = Math.round((Date.now() - startTime) / 1000);
-                  const timeStr = elapsed > 60
-                    ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
-                    : `${elapsed}s`;
-                  const heartbeatLine = `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`;
-                  const contentWithHeader = `${heartbeatLine}\n---\n${chunks[i]}`;
+                // Codex: with heartbeat header, preserve buffer for incremental display
+                const elapsed = Math.round((Date.now() - startTime) / 1000);
+                const timeStr = elapsed > 60
+                  ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+                  : `${elapsed}s`;
+                const heartbeatLine = `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`;
+                const MAX_CONTENT_LENGTH = 1800; // Leave room for heartbeat header
 
-                  if (i === 0) {
-                    await currentMessage.edit({ content: contentWithHeader, components: [stopRow] });
-                  } else {
-                    currentMessage = await channel.send({ content: contentWithHeader, components: isLast ? [stopRow] : [] });
-                  }
+                let contentToShow = responseBuffer;
+                // Show the most recent content (tail) if too long
+                if (contentToShow.length > MAX_CONTENT_LENGTH) {
+                  contentToShow = "..." + contentToShow.slice(-MAX_CONTENT_LENGTH);
                 }
+
+                const contentWithHeader = `${heartbeatLine}\n---\n${contentToShow}`;
+                await currentMessage.edit({ content: contentWithHeader, components: [stopRow] });
+                // Note: For Codex, we DON'T clear responseBuffer to preserve full output for next heartbeat
               }
-              responseBuffer = "";
             } catch (e) {
               console.warn(`[stream] Failed to edit message for ${channelId}, sending new:`, e instanceof Error ? e.message : e);
               currentMessage = await channel.send({
