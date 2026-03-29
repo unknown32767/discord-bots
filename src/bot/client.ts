@@ -30,8 +30,9 @@ import * as usageCmd from "./commands/usage.js";
 import * as switchModelCmd from "./commands/switch-model.js";
 import * as modeCmd from "./commands/mode.js";
 import * as compactCmd from "./commands/compact.js";
+import * as sessionCmd from "./commands/session.js";
 
-const commands = [registerCmd, unregisterCmd, statusCmd, stopCmd, autoApproveCmd, sessionsCmd, clearSessionsCmd, lastCmd, queueCmd, usageCmd, switchModelCmd, modeCmd, compactCmd];
+const commands = [registerCmd, unregisterCmd, statusCmd, stopCmd, autoApproveCmd, sessionsCmd, clearSessionsCmd, lastCmd, queueCmd, usageCmd, switchModelCmd, modeCmd, compactCmd, sessionCmd];
 const commandMap = new Collection<
   string,
   { execute: (interaction: ChatInputCommandInteraction) => Promise<void> }
