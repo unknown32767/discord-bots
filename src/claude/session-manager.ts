@@ -478,8 +478,6 @@ class SessionManager {
       }
     } catch (error) {
       // Skip error if result was already delivered (e.g., "Credit balance is too low" + exit code 1)
-    } catch (error) {
-      // Skip error if result was already delivered (e.g., "Credit balance is too low" + exit code 1)
       if (hasResult) {
         console.warn(`[session] Ignoring post-result error for ${channelId}:`, error instanceof Error ? error.message : error);
         return;
