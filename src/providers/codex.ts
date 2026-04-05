@@ -1,4 +1,5 @@
 import type { AgentProvider, AgentMessage, QueryOptions, AIProvider } from "./base.js";
+import { getChannelConfig } from "../db/database.js";
 
 // Codex SDK types
 interface ThreadEvent {
@@ -25,46 +26,20 @@ interface ThreadItem {
   message?: string;
 }
 
-interface StreamedTurn {
-  events: AsyncGenerator<ThreadEvent>;
-}
-
-interface Thread {
-  id: string | null;
-  runStreamed(input: string, options?: { signal?: AbortSignal }): Promise<StreamedTurn>;
-}
-
-interface CodexClass {
-  startThread(options?: {
-    workingDirectory?: string;
-    approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
-    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
-    networkAccessEnabled?: boolean;
-    [key: string]: unknown;
-  }): Thread;
-  resumeThread(id: string, options?: {
-    workingDirectory?: string;
-    approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted";
-    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
-    networkAccessEnabled?: boolean;
-    [key: string]: unknown;
-  }): Thread;
-}
-
 export class CodexProvider implements AgentProvider {
   readonly name: AIProvider = "codex";
   private abortController: AbortController | null = null;
-  private currentThread: Thread | null = null;
 
   async *query(options: QueryOptions): AsyncIterable<AgentMessage> {
-    const { prompt, cwd, sessionId } = options;
+    const { prompt, cwd, channelId, sessionId } = options;
 
     this.abortController = new AbortController();
 
     try {
       // Dynamic import to handle SDK loading
       const codexModule = await import("@openai/codex-sdk");
-      const Codex = codexModule.Codex as typeof CodexClass;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Codex = codexModule.Codex as any;
 
       if (!Codex) {
         yield {
@@ -78,6 +53,9 @@ export class CodexProvider implements AgentProvider {
       // Uses CLI's device code authentication from ~/.codex/
       const codex = new Codex();
 
+      // Load per-channel configuration for additional directories
+      const channelConfig = channelId ? getChannelConfig(channelId) : {};
+
       // Start or resume thread
       // sandboxMode: workspace-write allows file edits, read-only is default
       const thread = sessionId
@@ -87,6 +65,7 @@ export class CodexProvider implements AgentProvider {
             skipGitRepoCheck: true,
             sandboxMode: "workspace-write",
             networkAccessEnabled: true,
+            additionalDirectories: channelConfig.additionalDirectories,
           })
         : codex.startThread({
             workingDirectory: cwd,
@@ -94,9 +73,8 @@ export class CodexProvider implements AgentProvider {
             skipGitRepoCheck: true,
             sandboxMode: "workspace-write",
             networkAccessEnabled: true,
+            additionalDirectories: channelConfig.additionalDirectories,
           });
-
-      this.currentThread = thread;
 
       // Yield init message with thread ID
       if (thread.id) {
@@ -247,6 +225,5 @@ export class CodexProvider implements AgentProvider {
       this.abortController.abort();
       this.abortController = null;
     }
-    this.currentThread = null;
   }
 }

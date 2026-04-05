@@ -11,6 +11,7 @@ export interface ToolDecision {
 export interface QueryOptions {
   prompt: string;
   cwd: string;
+  channelId?: string; // For per-channel configuration (e.g., additionalDirectories for Codex)
   sessionId?: string;
   mode?: 'default' | 'plan';
   onToolRequest?: (toolName: string, input: Record<string, unknown>) => Promise<ToolDecision>;

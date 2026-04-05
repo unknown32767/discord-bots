@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import path from "node:path";
-import type { Project, Session, SessionStatus, AgentMode } from "./types.js";
+import type { Project, Session, SessionStatus, AgentMode, ChannelConfig } from "./types.js";
 
 const DB_PATH = path.join(process.cwd(), "data.db");
 
@@ -44,6 +44,13 @@ export function initDatabase(): void {
   } catch {
     // Column already exists, ignore error
   }
+
+  // Migration: add config column for per-channel JSON configuration
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN config TEXT`);
+  } catch {
+    // Column already exists, ignore error
+  }
 }
 
 export function getDb(): Database.Database {
@@ -75,9 +82,10 @@ export function registerInheritedProject(
       guild_id,
       auto_approve,
       provider,
-      mode
+      mode,
+      config
     )
-    VALUES (?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
@@ -87,6 +95,7 @@ export function registerInheritedProject(
     parentProject.auto_approve,
     parentProject.provider,
     parentProject.mode,
+    parentProject.config,
   );
 
   return result.changes > 0;
@@ -194,4 +203,38 @@ export function getAllSessions(guildId: string): (Session & { project_path: stri
       WHERE p.guild_id = ?
     `)
     .all(guildId) as (Session & { project_path: string })[];
+}
+
+// Channel configuration queries
+export function getChannelConfig(channelId: string): ChannelConfig {
+  const row = db
+    .prepare("SELECT config FROM projects WHERE channel_id = ?")
+    .get(channelId) as { config?: string } | undefined;
+
+  if (!row?.config) return {};
+
+  try {
+    return JSON.parse(row.config) as ChannelConfig;
+  } catch {
+    return {};
+  }
+}
+
+export function setChannelConfig(
+  channelId: string,
+  config: Partial<ChannelConfig>,
+): void {
+  const existing = getChannelConfig(channelId);
+  const merged = { ...existing, ...config };
+
+  db.prepare("UPDATE projects SET config = ? WHERE channel_id = ?").run(
+    JSON.stringify(merged),
+    channelId,
+  );
+}
+
+export function clearChannelConfig(channelId: string): void {
+  db.prepare("UPDATE projects SET config = NULL WHERE channel_id = ?").run(
+    channelId,
+  );
 }

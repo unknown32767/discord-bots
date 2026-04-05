@@ -14,10 +14,8 @@ export class ClaudeProvider implements AgentProvider {
       options: {
         cwd,
         permissionMode: mode ?? "default",
-        // Strip ANTHROPIC_API_KEY from env for security
         env: {
           ...process.env,
-          ANTHROPIC_API_KEY: undefined,
           PATH: `${path.dirname(process.execPath)}:${process.env.PATH ?? ""}`,
         },
         // Enable gstack skills

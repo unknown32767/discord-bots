@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import type { TextChannel } from "discord.js";
 import {
   upsertSession,
@@ -141,6 +140,7 @@ class SessionManager {
       for await (const message of provider.query({
         prompt,
         cwd: project.project_path,
+        channelId,
         sessionId: resumeSessionId,
         mode: project.mode ?? "default",
         onToolRequest: async (toolName: string, input: Record<string, unknown>) => {

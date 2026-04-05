@@ -3,7 +3,7 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
 } from "discord.js";
-import { getAllProjects, getSession } from "../../db/database.js";
+import { getAllProjects, getSession, getChannelConfig } from "../../db/database.js";
 import { L } from "../../utils/i18n.js";
 import { getProviderDisplayName } from "../../providers/index.js";
 
@@ -45,16 +45,29 @@ export async function execute(
 
     const modeDisplay = project.mode === "plan" ? "📋 Plan" : "⚡ Default";
 
+    // Get per-channel config
+    const channelConfig = getChannelConfig(project.channel_id);
+    const hasConfig = channelConfig.additionalDirectories && channelConfig.additionalDirectories.length > 0;
+
+    const valueLines = [
+      `\`${project.project_path}\``,
+      `${L("Provider", "제공자")}: **${provider}**`,
+      `${L("Status", "상태")}: **${status}**`,
+      `${L("Auto-approve", "자동 승인")}: ${project.auto_approve ? L("On", "켜짐") : L("Off", "꺼짐")}`,
+      `${L("Mode", "모드")}: ${modeDisplay}`,
+    ];
+
+    // Show config summary if present
+    if (hasConfig) {
+      const dirCount = channelConfig.additionalDirectories?.length ?? 0;
+      valueLines.push(`${L("Extra dirs", "추가 디렉토리")}: ${dirCount} ${dirCount > 0 ? "✓" : ""}`);
+    }
+
+    valueLines.push(`${L("Last activity", "마지막 활동")}: ${lastActivity}`);
+
     embed.addFields({
       name: `${emoji} <#${project.channel_id}>`,
-      value: [
-        `\`${project.project_path}\``,
-        `${L("Provider", "제공자")}: **${provider}**`,
-        `${L("Status", "상태")}: **${status}**`,
-        `${L("Auto-approve", "자동 승인")}: ${project.auto_approve ? L("On", "켜짐") : L("Off", "꺼짐")}`,
-        `${L("Mode", "모드")}: ${modeDisplay}`,
-        `${L("Last activity", "마지막 활동")}: ${lastActivity}`,
-      ].join("\n"),
+      value: valueLines.join("\n"),
       inline: false,
     });
   }

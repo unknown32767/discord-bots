@@ -42,8 +42,8 @@ export async function execute(
   const config = getConfig();
 
   // Determine provider: use provided value, or fall back to default config
-  const provider = isValidProvider(providerInput ?? "")
-    ? providerInput!
+  const provider: "claude" | "codex" = isValidProvider(providerInput ?? "")
+    ? (providerInput as "claude" | "codex")
     : config.DEFAULT_PROVIDER;
 
   // If input is absolute path, use as-is; otherwise join with base dir
