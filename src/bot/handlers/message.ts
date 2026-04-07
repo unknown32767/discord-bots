@@ -1,4 +1,4 @@
-import { Message, TextChannel, Attachment, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import { Message, TextChannel, Attachment, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageType } from "discord.js";
 import { getProject } from "../../db/database.js";
 import { isAllowedUser, checkRateLimit } from "../../security/guard.js";
 import { sessionManager } from "../../claude/session-manager.js";
@@ -63,6 +63,12 @@ async function downloadAttachment(
 export async function handleMessage(message: Message): Promise<void> {
   // Ignore bots and DMs
   if (message.author.bot || !message.guild) return;
+
+  // Skip thread starter messages (when creating a thread)
+  if (message.type === MessageType.ThreadStarterMessage) return;
+
+  // Skip messages that are the source of a thread (创建子区的原始消息)
+  if (message.hasThread) return;
 
   // Check if channel is registered
   const project = getProject(message.channelId);
