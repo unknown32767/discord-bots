@@ -13,7 +13,7 @@ import { createProvider, type AgentProvider } from "../providers/index.js";
 import {
   createToolApprovalEmbed,
   createAskUserQuestionEmbed,
-  createResultEmbed,
+  createResultEmbeds,
   createStopButton,
   createCompletedButton,
   createThinkingEmbed,
@@ -448,14 +448,19 @@ class SessionManager {
             console.warn(`[complete] Failed to update completed button for ${channelId}:`, e instanceof Error ? e.message : e);
           }
 
-          // Send result embed with formatted output
-          const resultEmbed = createResultEmbed(
+          // Send result embed(s) with formatted output
+          const resultEmbeds = createResultEmbeds(
             message.text,
             message.cost ?? 0,
             message.durationMs ?? 0,
             getConfig().SHOW_COST,
           );
-          await channel.send({ embeds: [resultEmbed] });
+
+          // Send embeds in batches (Discord allows up to 10 embeds per message)
+          for (let i = 0; i < resultEmbeds.length; i += 10) {
+            const batch = resultEmbeds.slice(i, i + 10);
+            await channel.send({ embeds: batch });
+          }
 
           // Detect auth/credit errors in result and suggest re-login
           const resultAuthKeywords = ["credit balance", "not authenticated", "unauthorized", "authentication", "login required", "auth token", "expired", "not logged in", "please run /login"];

@@ -249,25 +249,73 @@ export function createAskUserQuestionEmbed(
   return { embed, components };
 }
 
+const MAX_EMBED_DESCRIPTION_LENGTH = 4000; // Leave some buffer from 4096 limit
+
+export function createResultEmbeds(
+  result: string,
+  costUsd: number,
+  durationMs: number,
+  showCost: boolean = true,
+): EmbedBuilder[] {
+  const duration = `${(durationMs / 1000).toFixed(1)}s`;
+  const footer = showCost
+    ? `${L("Cost (est.)", "비용 (추정)")} : $${costUsd.toFixed(4)}  |  ${L("Duration", "소요 시간")} : ${duration}`
+    : `${L("Duration", "소요 시간")} : ${duration}`;
+
+  const embeds: EmbedBuilder[] = [];
+
+  // Split result into chunks
+  let remaining = result;
+  let pageNum = 1;
+
+  while (remaining.length > 0) {
+    const chunk = remaining.slice(0, MAX_EMBED_DESCRIPTION_LENGTH);
+    remaining = remaining.slice(MAX_EMBED_DESCRIPTION_LENGTH);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff00)
+      .setTimestamp();
+
+    if (pageNum === 1) {
+      // First embed has title and footer
+      embed
+        .setTitle(L("✅ Task Complete", "✅ 작업 완료"))
+        .setDescription(chunk)
+        .setFooter({ text: footer });
+    } else {
+      // Subsequent embeds only have content and page indicator
+      embed
+        .setTitle(`${L("Continue...", "계속...")} (${pageNum})`)
+        .setDescription(chunk);
+    }
+
+    embeds.push(embed);
+    pageNum++;
+  }
+
+  // Handle empty result
+  if (embeds.length === 0) {
+    const embed = new EmbedBuilder()
+      .setTitle(L("✅ Task Complete", "✅ 작업 완료"))
+      .setDescription("")
+      .setColor(0x00ff00)
+      .setFooter({ text: footer })
+      .setTimestamp();
+    embeds.push(embed);
+  }
+
+  return embeds;
+}
+
+// Keep old function for backward compatibility (deprecated)
 export function createResultEmbed(
   result: string,
   costUsd: number,
   durationMs: number,
   showCost: boolean = true,
 ): EmbedBuilder {
-  const duration = `${(durationMs / 1000).toFixed(1)}s`;
-  const footer = showCost
-    ? `${L("Cost (est.)", "비용 (추정)")} : $${costUsd.toFixed(4)}  |  ${L("Duration", "소요 시간")} : ${duration}`
-    : `${L("Duration", "소요 시간")} : ${duration}`;
-
-  const embed = new EmbedBuilder()
-    .setTitle(L("✅ Task Complete", "✅ 작업 완료"))
-    .setDescription(result.slice(0, 4000))
-    .setColor(0x00ff00)
-    .setFooter({ text: footer })
-    .setTimestamp();
-
-  return embed;
+  const embeds = createResultEmbeds(result, costUsd, durationMs, showCost);
+  return embeds[0]!;
 }
 
 export function createThinkingEmbed(text: string): EmbedBuilder {
