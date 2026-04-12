@@ -65,13 +65,13 @@ export class CodexProvider implements AgentProvider {
       ];
 
       // Start or resume thread
-      // sandboxMode: workspace-write allows file edits, read-only is default
+      // sandboxMode: danger-full-access disables sandboxing entirely (use with caution)
       const thread = sessionId
         ? codex.resumeThread(sessionId, {
             workingDirectory: cwd,
             approvalPolicy: "on-request",
             skipGitRepoCheck: true,
-            sandboxMode: "workspace-write",
+            sandboxMode: "danger-full-access",
             networkAccessEnabled: true,
             additionalDirectories: additionalDirs,
           })
@@ -79,7 +79,7 @@ export class CodexProvider implements AgentProvider {
             workingDirectory: cwd,
             approvalPolicy: "on-request",
             skipGitRepoCheck: true,
-            sandboxMode: "workspace-write",
+            sandboxMode: "danger-full-access",
             networkAccessEnabled: true,
             additionalDirectories: additionalDirs,
           });
