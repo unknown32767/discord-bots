@@ -1,5 +1,6 @@
 import type { AgentProvider, AgentMessage, QueryOptions, AIProvider } from "./base.js";
 import { getChannelConfig } from "../db/database.js";
+import path from "node:path";
 
 // Codex SDK types
 interface ThreadEvent {
@@ -56,6 +57,13 @@ export class CodexProvider implements AgentProvider {
       // Load per-channel configuration for additional directories
       const channelConfig = channelId ? getChannelConfig(channelId) : {};
 
+      // Build additional directories list including .git for write access
+      // Codex 0.120+ requires explicit .git permission (read-only carveouts)
+      const additionalDirs = [
+        ...(channelConfig.additionalDirectories || []),
+        path.join(cwd, ".git"),
+      ];
+
       // Start or resume thread
       // sandboxMode: workspace-write allows file edits, read-only is default
       const thread = sessionId
@@ -65,7 +73,7 @@ export class CodexProvider implements AgentProvider {
             skipGitRepoCheck: true,
             sandboxMode: "workspace-write",
             networkAccessEnabled: true,
-            additionalDirectories: channelConfig.additionalDirectories,
+            additionalDirectories: additionalDirs,
           })
         : codex.startThread({
             workingDirectory: cwd,
@@ -73,7 +81,7 @@ export class CodexProvider implements AgentProvider {
             skipGitRepoCheck: true,
             sandboxMode: "workspace-write",
             networkAccessEnabled: true,
-            additionalDirectories: channelConfig.additionalDirectories,
+            additionalDirectories: additionalDirs,
           });
 
       // Yield init message with thread ID
