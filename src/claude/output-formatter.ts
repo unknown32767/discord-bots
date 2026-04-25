@@ -111,8 +111,10 @@ export function createToolApprovalEmbed(
       });
     }
   } else if (toolName === "Bash") {
-    const command = (input.command as string) ?? "unknown";
-    const description = (input.description as string) ?? "";
+    const rawCommand = (input.command as string) ?? "unknown";
+    const command = rawCommand.length > 900 ? rawCommand.slice(0, 900) + "…" : rawCommand;
+    const rawDescription = (input.description as string) ?? "";
+    const description = rawDescription.length > 900 ? rawDescription.slice(0, 900) + "…" : rawDescription;
     embed.addFields(
       { name: L("Command", "명령어"), value: `\`\`\`bash\n${command}\n\`\`\``, inline: false },
     );
@@ -159,6 +161,11 @@ export interface AskQuestionData {
   multiSelect: boolean;
 }
 
+const MAX_EMBED_QUESTION_DESC = 1500;
+const MAX_EMBED_OPTION_NAME = 100;
+const MAX_EMBED_OPTION_VALUE = 200;
+const MAX_EMBED_OPTIONS_SHOWN = 12;
+
 export function createAskUserQuestionEmbed(
   questionData: AskQuestionData,
   requestId: string,
@@ -170,17 +177,40 @@ export function createAskUserQuestionEmbed(
       ? `❓ ${questionData.header} (${questionIndex + 1}/${totalQuestions})`
       : `❓ ${questionData.header}`;
 
+  const truncatedQuestion =
+    questionData.question.length > MAX_EMBED_QUESTION_DESC
+      ? questionData.question.slice(0, MAX_EMBED_QUESTION_DESC) + "…"
+      : questionData.question;
+
   const embed = new EmbedBuilder()
-    .setTitle(title)
-    .setDescription(questionData.question)
+    .setTitle(title.length > 200 ? title.slice(0, 200) + "…" : title)
+    .setDescription(truncatedQuestion)
     .setColor(0x7c3aed)
     .setTimestamp();
 
-  // Add option descriptions as embed fields
-  for (const opt of questionData.options) {
+  // Add option descriptions as embed fields (truncated to stay within Discord's 6000 total embed limit)
+  const optionsToShow = questionData.options.slice(0, MAX_EMBED_OPTIONS_SHOWN);
+  for (const opt of optionsToShow) {
+    const name =
+      opt.label.length > MAX_EMBED_OPTION_NAME
+        ? opt.label.slice(0, MAX_EMBED_OPTION_NAME) + "…"
+        : opt.label;
+    const value =
+      opt.description && opt.description.length > MAX_EMBED_OPTION_VALUE
+        ? opt.description.slice(0, MAX_EMBED_OPTION_VALUE) + "…"
+        : opt.description || "\u200b";
     embed.addFields({
-      name: opt.label,
-      value: opt.description || "\u200b",
+      name,
+      value,
+      inline: false,
+    });
+  }
+
+  if (questionData.options.length > MAX_EMBED_OPTIONS_SHOWN) {
+    const remaining = questionData.options.length - MAX_EMBED_OPTIONS_SHOWN;
+    embed.addFields({
+      name: "…",
+      value: L(`…and ${remaining} more option(s)`, `…외 ${remaining}개의 옵션`),
       inline: false,
     });
   }
