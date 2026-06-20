@@ -2,31 +2,6 @@ import type { AgentProvider, AgentMessage, QueryOptions, AIProvider } from "./ba
 import { getChannelConfig } from "../db/database.js";
 import path from "node:path";
 
-// Codex SDK types
-interface ThreadEvent {
-  type: string;
-  thread_id?: string;
-  item?: ThreadItem;
-  usage?: {
-    input_tokens: number;
-    output_tokens: number;
-    cached_input_tokens: number;
-  };
-  error?: {
-    message: string;
-  };
-}
-
-interface ThreadItem {
-  id: string;
-  type: string;
-  text?: string;
-  command?: string;
-  status?: string;
-  exit_code?: number;
-  message?: string;
-}
-
 export class CodexProvider implements AgentProvider {
   readonly name: AIProvider = "codex";
   private abortController: AbortController | null = null;

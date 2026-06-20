@@ -17,6 +17,10 @@ const envSchema = z.object({
     .enum(["claude", "codex"])
     .default("claude"),
   OPENAI_API_KEY: z.string().optional(),
+  CLAUDE_MODEL: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
 });
 
 export type Config = z.infer<typeof envSchema>;

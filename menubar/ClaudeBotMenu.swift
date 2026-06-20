@@ -18,6 +18,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateAvailable: Bool = false
     private var isKorean: Bool = false
     private var controlPanel: NSWindow?
+    private var lastKnownRunning: Bool = false
+    private var botProcess: Process?
     private var cachedReleaseNotes: String = ""
     private var cachedNewVersion: String = ""
 
@@ -60,6 +62,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // SIGTERM/SIGINT/SIGHUP — panel must take the bot down with it.
+        // applicationWillTerminate is not called for raw signals, so install handlers explicitly.
+        let cleanupAndExit: @convention(c) (Int32) -> Void = { _ in
+            // Best-effort: spawn pkill via posix_spawn (system() is unavailable on macOS Swift).
+            var pid: pid_t = 0
+            var argv: [UnsafeMutablePointer<CChar>?] = [
+                strdup("/usr/bin/pkill"),
+                strdup("-KILL"),
+                strdup("-f"),
+                strdup("node dist/index.js"),
+                nil,
+            ]
+            posix_spawn(&pid, "/usr/bin/pkill", nil, nil, argv, nil)
+            for p in argv { free(p) }
+            exit(0)
+        }
+        signal(SIGTERM, cleanupAndExit)
+        signal(SIGINT, cleanupAndExit)
+        signal(SIGHUP, cleanupAndExit)
+
         // Enable Cmd+C/V/X/A in text fields (required for LSUIElement apps without a nib)
         let mainMenu = NSMenu()
         let editMenuItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
@@ -84,15 +106,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         currentVersion = getVersion()
+
+        // One-time migration: remove legacy launchd-managed bot plist so launchd
+        // doesn't auto-start the bot at boot. The panel manages bot lifecycle now.
+        migrateAwayFromBotPlist()
+
         checkForUpdates()
         updateStatus()
         buildMenu()
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            self?.updateStatus()
-            self?.buildMenu()
-            if self?.controlPanel?.isVisible == true {
-                self?.fetchUsageIfStale()
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let prevRunning = self.lastKnownRunning
+            let nowRunning = self.isRunning()
+            self.updateStatus()
+            self.buildMenu()
+            if self.controlPanel?.isVisible == true {
+                // Only rebuild panel when running state actually changes (avoids flicker)
+                if prevRunning != nowRunning {
+                    self.rebuildControlPanel()
+                }
+                self.fetchUsageIfStale()
             }
+            self.lastKnownRunning = nowRunning
         }
         // Check for updates every 5 hours
         Timer.scheduledTimer(withTimeInterval: 18000, repeats: true) { [weak self] _ in
@@ -107,6 +142,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     self.openSettings()
                 }
+            } else {
+                // Auto-start the bot once when panel launches (e.g. after Mac boot)
+                self.startBot()
             }
         }
     }
@@ -276,7 +314,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if alert.runModal() == .alertFirstButtonReturn {
             let wasRunning = isRunning()
             if wasRunning {
-                runShell("launchctl unload '\(plistDst)' 2>/dev/null")
+                stopBot()
             }
 
             runShell("cd '\(botDir)' && git fetch origin main --tags")
@@ -292,8 +330,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 errAlert.alertStyle = .critical
                 errAlert.runModal()
                 if wasRunning {
-                    generatePlist()
-                    runShell("launchctl load '\(plistDst)'")
+                    startBot()
                 }
                 return
             }
@@ -315,8 +352,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 runShell("swiftc -o '\(swiftBin)' '\(swiftSrc)' -framework Cocoa 2>&1")
 
                 if wasRunning {
-                    generatePlist()
-                    runShell("launchctl load '\(plistDst)'")
+                    startBot()
                 }
 
                 // Restart menu bar app (detached from terminal)
@@ -327,8 +363,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             if wasRunning {
-                generatePlist()
-                runShell("launchctl load '\(plistDst)'")
+                startBot()
             }
 
             let doneAlert = NSAlert()
@@ -343,13 +378,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func isRunning() -> Bool {
-        // Check both launchctl (primary) and .bot.lock (fallback)
-        let output = runShell("launchctl list | grep '\(label)' | awk '{print $1}'")
-        let pid = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !pid.isEmpty && pid != "-" && pid != "0" {
-            return true
-        }
-        return FileManager.default.fileExists(atPath: botDir + "/.bot.lock")
+        // Single source of truth: panel spawns the bot as a child Process and tracks it.
+        return botProcess?.isRunning ?? false
     }
 
     private func updateStatus() {
@@ -1554,64 +1584,75 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Plist Generation
 
-    private func generatePlist() {
-        let content = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key>
-            <string>\(label)</string>
-            <key>ProgramArguments</key>
-            <array>
-                <string>/bin/bash</string>
-                <string>\(botDir)/mac-start.sh</string>
-                <string>--fg</string>
-            </array>
-            <key>WorkingDirectory</key>
-            <string>\(botDir)</string>
-            <key>RunAtLoad</key>
-            <true/>
-            <key>KeepAlive</key>
-            <true/>
-            <key>ThrottleInterval</key>
-            <integer>10</integer>
-            <key>StandardOutPath</key>
-            <string>\(botDir)/bot.log</string>
-            <key>StandardErrorPath</key>
-            <string>\(botDir)/bot-error.log</string>
-            <key>EnvironmentVariables</key>
-            <dict>
-                <key>PATH</key>
-                <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-            </dict>
-        </dict>
-        </plist>
-        """
-        try? content.write(toFile: plistDst, atomically: true, encoding: .utf8)
+    /// Migrate from old launchd-managed bot to panel-managed bot.
+    /// Removes the old com.claude-discord.plist so launchd won't auto-start the bot at boot.
+    private func migrateAwayFromBotPlist() {
+        let uid = runShell("id -u").trimmingCharacters(in: .whitespacesAndNewlines)
+        if FileManager.default.fileExists(atPath: plistDst) {
+            NSLog("[ClaudeBotMenu] migration: removing legacy bot plist at \(plistDst)")
+            runShell("""
+                launchctl bootout gui/\(uid)/\(label) 2>/dev/null
+                launchctl unload '\(plistDst)' 2>/dev/null
+                launchctl remove \(label) 2>/dev/null
+            """)
+            try? FileManager.default.removeItem(atPath: plistDst)
+        }
+        // Kill any leftover bot the old launchd might have spawned
+        runShell("pkill -KILL -f 'node dist/index.js' 2>/dev/null")
     }
 
     // MARK: - Bot Controls
 
     @objc private func startBot() {
-        // Auto-rebuild if source is newer than dist
-        let distPath = "\(botDir)/dist/index.js"
-        let rebuildNeeded = runShell("find '\(botDir)/src' -name '*.ts' -newer '\(distPath)' 2>/dev/null | head -1").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !rebuildNeeded.isEmpty || !FileManager.default.fileExists(atPath: distPath) {
-            runShell("cd '\(botDir)' && npm install && npm run build 2>&1")
+        NSLog("[ClaudeBotMenu] startBot() called")
+        if let p = botProcess, p.isRunning {
+            NSLog("[ClaudeBotMenu] bot already running, ignoring start")
+            return
         }
-        runShell("launchctl unload '\(plistDst)' 2>/dev/null")
-        generatePlist()
-        runShell("launchctl load '\(plistDst)'")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            self.updateStatus()
-            self.buildMenu()
-            self.rebuildControlPanel()
-        }
-    }
 
-    @objc private func stopBot() {
-        runShell("launchctl unload '\(plistDst)' 2>/dev/null")
+        // Defensive: kill any orphan node that might be left from prior crash
+        runShell("pkill -KILL -f 'node dist/index.js' 2>/dev/null; rm -f '\(botDir)/.bot.lock'")
+
+        // Open log files for the child process
+        let outLogPath = "\(botDir)/bot.log"
+        let errLogPath = "\(botDir)/bot-error.log"
+        if !FileManager.default.fileExists(atPath: outLogPath) {
+            FileManager.default.createFile(atPath: outLogPath, contents: nil)
+        }
+        if !FileManager.default.fileExists(atPath: errLogPath) {
+            FileManager.default.createFile(atPath: errLogPath, contents: nil)
+        }
+
+        let process = Process()
+        process.launchPath = "/bin/bash"
+        process.arguments = ["\(botDir)/mac-start.sh", "--fg"]
+        process.currentDirectoryPath = botDir
+        if let outHandle = FileHandle(forWritingAtPath: outLogPath) {
+            outHandle.seekToEndOfFile()
+            process.standardOutput = outHandle
+        }
+        if let errHandle = FileHandle(forWritingAtPath: errLogPath) {
+            errHandle.seekToEndOfFile()
+            process.standardError = errHandle
+        }
+        process.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.botProcess = nil
+                self?.updateStatus()
+                self?.buildMenu()
+                self?.rebuildControlPanel()
+            }
+        }
+
+        do {
+            try process.run()
+            botProcess = process
+            NSLog("[ClaudeBotMenu] bot spawned, pid=\(process.processIdentifier)")
+        } catch {
+            NSLog("[ClaudeBotMenu] failed to spawn bot: \(error)")
+            botProcess = nil
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             self.updateStatus()
             self.buildMenu()
@@ -1619,16 +1660,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func restartBot() {
-        runShell("launchctl unload '\(plistDst)' 2>/dev/null")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            self.generatePlist()
-            self.runShell("launchctl load '\(self.plistDst)'")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                self.updateStatus()
-                self.buildMenu()
-                self.rebuildControlPanel()
+    @objc private func stopBot() {
+        NSLog("[ClaudeBotMenu] stopBot() called")
+        let process = botProcess
+        botProcess = nil  // immediately reflect intent so isRunning() returns false
+
+        if let p = process, p.isRunning {
+            p.terminate()  // SIGTERM
+        }
+
+        // Background: wait briefly, then SIGKILL any leftover, plus clean lock
+        DispatchQueue.global(qos: .userInitiated).async {
+            for _ in 0..<8 {
+                if !(process?.isRunning ?? false) { break }
+                Thread.sleep(forTimeInterval: 0.2)
             }
+            self.runShell("pkill -KILL -f 'node dist/index.js' 2>/dev/null; rm -f '\(self.botDir)/.bot.lock'")
+        }
+
+        updateStatus()
+        buildMenu()
+        rebuildControlPanel()
+        controlPanel?.displayIfNeeded()
+    }
+
+    @objc private func restartBot() {
+        stopBot()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            self.startBot()
         }
     }
 
@@ -1647,10 +1706,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quitAll() {
-        if isRunning() {
-            runShell("launchctl unload '\(plistDst)' 2>/dev/null")
+        stopBot()
+        // Give stopBot time to send SIGTERM
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.runShell("pkill -KILL -f 'node dist/index.js' 2>/dev/null; rm -f '\(self.botDir)/.bot.lock'")
+            NSApplication.shared.terminate(nil)
         }
-        NSApplication.shared.terminate(nil)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Bot is the panel's child — kill it on exit
+        if let p = botProcess, p.isRunning {
+            p.terminate()
+        }
+        runShell("pkill -KILL -f 'node dist/index.js' 2>/dev/null; rm -f '\(botDir)/.bot.lock'")
     }
 
     @discardableResult

@@ -128,175 +128,182 @@ class SessionManager {
       }
     }, 15_000);
 
-    try {
-      // Store the active session
-      this.sessions.set(channelId, {
-        provider,
-        channelId,
-        sessionId: resumeSessionId ?? null,
-        dbId,
-      });
+    const runQuery = (useResume: boolean) => provider.query({
+      prompt,
+      cwd: project.project_path,
+      channelId,
+      sessionId: useResume ? resumeSessionId : undefined,
+      mode: project.mode ?? "default",
+      onToolRequest: async (toolName: string, input: Record<string, unknown>) => {
+        toolUseCount++;
 
-      for await (const message of provider.query({
-        prompt,
-        cwd: project.project_path,
-        channelId,
-        sessionId: resumeSessionId,
-        mode: project.mode ?? "default",
-        onToolRequest: async (toolName: string, input: Record<string, unknown>) => {
-          toolUseCount++;
+        // Tool activity labels for Discord display
+        const toolLabels: Record<string, string> = {
+          Read: L("Reading files", "파일 읽는 중"),
+          Glob: L("Searching files", "파일 검색 중"),
+          Grep: L("Searching code", "코드 검색 중"),
+          Write: L("Writing file", "파일 작성 중"),
+          Edit: L("Editing file", "파일 편집 중"),
+          Bash: L("Running command", "명령어 실행 중"),
+          WebSearch: L("Searching web", "웹 검색 중"),
+          WebFetch: L("Fetching URL", "URL 가져오는 중"),
+          TodoWrite: L("Updating tasks", "작업 업데이트 중"),
+        };
+        const filePath = typeof input.file_path === "string"
+          ? ` \`${(input.file_path as string).split(/[\\/]/).pop()}\``
+          : "";
+        lastActivity = `${toolLabels[toolName] ?? `Using ${toolName}`}${filePath}`;
 
-          // Tool activity labels for Discord display
-          const toolLabels: Record<string, string> = {
-            Read: L("Reading files", "파일 읽는 중"),
-            Glob: L("Searching files", "파일 검색 중"),
-            Grep: L("Searching code", "코드 검색 중"),
-            Write: L("Writing file", "파일 작성 중"),
-            Edit: L("Editing file", "파일 편집 중"),
-            Bash: L("Running command", "명령어 실행 중"),
-            WebSearch: L("Searching web", "웹 검색 중"),
-            WebFetch: L("Fetching URL", "URL 가져오는 중"),
-            TodoWrite: L("Updating tasks", "작업 업데이트 중"),
-          };
-          const filePath = typeof input.file_path === "string"
-            ? ` \`${(input.file_path as string).split(/[\\/]/).pop()}\``
-            : "";
-          lastActivity = `${toolLabels[toolName] ?? `Using ${toolName}`}${filePath}`;
+        // Update status message if no text output yet
+        if (!hasTextOutput) {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          const timeStr = elapsed > 60
+            ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+            : `${elapsed}s`;
+          try {
+            await currentMessage.edit({
+              content: `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`,
+              components: [stopRow],
+            });
+          } catch (e) {
+            console.warn(`[tool-status] Failed to edit message for ${channelId}:`, e instanceof Error ? e.message : e);
+          }
+        }
 
-          // Update status message if no text output yet
-          if (!hasTextOutput) {
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
-            const timeStr = elapsed > 60
-              ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
-              : `${elapsed}s`;
-            try {
-              await currentMessage.edit({
-                content: `⏳ ${lastActivity} (${timeStr}) [${toolUseCount} tools used]`,
-                components: [stopRow],
-              });
-            } catch (e) {
-              console.warn(`[tool-status] Failed to edit message for ${channelId}:`, e instanceof Error ? e.message : e);
-            }
+        // Handle AskUserQuestion with interactive Discord UI
+        if (toolName === "AskUserQuestion") {
+          const questions = (input.questions as AskQuestionData[]) ?? [];
+          if (questions.length === 0) {
+            return { behavior: "allow" as const, updatedInput: input };
           }
 
-          // Handle AskUserQuestion with interactive Discord UI
-          if (toolName === "AskUserQuestion") {
-            const questions = (input.questions as AskQuestionData[]) ?? [];
-            if (questions.length === 0) {
-              return { behavior: "allow" as const, updatedInput: input };
-            }
+          const answers: Record<string, string> = {};
 
-            const answers: Record<string, string> = {};
+          for (let qi = 0; qi < questions.length; qi++) {
+            const q = questions[qi];
+            const qRequestId = randomUUID();
+            const { embed, components } = createAskUserQuestionEmbed(
+              q,
+              qRequestId,
+              qi,
+              questions.length,
+            );
 
-            for (let qi = 0; qi < questions.length; qi++) {
-              const q = questions[qi];
-              const qRequestId = randomUUID();
-              const { embed, components } = createAskUserQuestionEmbed(
-                q,
-                qRequestId,
-                qi,
-                questions.length,
-              );
+            updateSessionStatus(channelId, "waiting");
+            await channel.send({ embeds: [embed], components });
 
-              updateSessionStatus(channelId, "waiting");
-              await channel.send({ embeds: [embed], components });
+            const answer = await new Promise<string | null>((resolve) => {
+              const timeout = setTimeout(() => {
+                pendingQuestions.delete(qRequestId);
+                // Clean up custom input if pending
+                const ci = pendingCustomInputs.get(channelId);
+                if (ci?.requestId === qRequestId) {
+                  pendingCustomInputs.delete(channelId);
+                }
+                resolve(null);
+              }, 5 * 60 * 1000);
 
-              const answer = await new Promise<string | null>((resolve) => {
-                const timeout = setTimeout(() => {
+              pendingQuestions.set(qRequestId, {
+                resolve: (ans) => {
+                  clearTimeout(timeout);
                   pendingQuestions.delete(qRequestId);
-                  // Clean up custom input if pending
-                  const ci = pendingCustomInputs.get(channelId);
-                  if (ci?.requestId === qRequestId) {
-                    pendingCustomInputs.delete(channelId);
-                  }
-                  resolve(null);
-                }, 5 * 60 * 1000);
-
-                pendingQuestions.set(qRequestId, {
-                  resolve: (ans) => {
-                    clearTimeout(timeout);
-                    pendingQuestions.delete(qRequestId);
-                    resolve(ans);
-                  },
-                  channelId,
-                });
+                  resolve(ans);
+                },
+                channelId,
               });
+            });
 
-              if (answer === null) {
-                updateSessionStatus(channelId, "online");
-                return {
-                  behavior: "deny" as const,
-                  message: L("Question timed out", "질문 시간 초과"),
-                };
-              }
-
-              answers[q.header] = answer;
+            if (answer === null) {
+              updateSessionStatus(channelId, "online");
+              return {
+                behavior: "deny" as const,
+                message: L("Question timed out", "질문 시간 초과"),
+              };
             }
 
+            answers[q.header] = answer;
+          }
+
+          updateSessionStatus(channelId, "online");
+          return {
+            behavior: "allow" as const,
+            updatedInput: { ...input, answers },
+          };
+        }
+
+        // Auto-approve read-only tools
+        const readOnlyTools = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite"];
+        if (readOnlyTools.includes(toolName)) {
+          return { behavior: "allow" as const, updatedInput: input };
+        }
+
+        // Check auto-approve setting
+        const currentProject = getProject(channelId);
+        if (currentProject?.auto_approve) {
+          return { behavior: "allow" as const, updatedInput: input };
+        }
+
+        // Ask user via Discord buttons
+        const requestId = randomUUID();
+        const { embed, row } = createToolApprovalEmbed(
+          toolName,
+          input,
+          requestId,
+        );
+
+        updateSessionStatus(channelId, "waiting");
+        await channel.send({
+          embeds: [embed],
+          components: [row],
+        });
+
+        // Wait for user decision (timeout 5 min)
+        return new Promise((resolve) => {
+          const timeout = setTimeout(() => {
+            pendingApprovals.delete(requestId);
             updateSessionStatus(channelId, "online");
-            return {
-              behavior: "allow" as const,
-              updatedInput: { ...input, answers },
-            };
-          }
+            resolve({ behavior: "deny" as const, message: "Approval timed out" });
+          }, 5 * 60 * 1000);
 
-          // Auto-approve read-only tools
-          const readOnlyTools = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite"];
-          if (readOnlyTools.includes(toolName)) {
-            return { behavior: "allow" as const, updatedInput: input };
-          }
-
-          // Check auto-approve setting
-          const currentProject = getProject(channelId);
-          if (currentProject?.auto_approve) {
-            return { behavior: "allow" as const, updatedInput: input };
-          }
-
-          // Ask user via Discord buttons
-          const requestId = randomUUID();
-          const { embed, row } = createToolApprovalEmbed(
-            toolName,
-            input,
-            requestId,
-          );
-
-          updateSessionStatus(channelId, "waiting");
-          await channel.send({
-            embeds: [embed],
-            components: [row],
-          });
-
-          // Wait for user decision (timeout 5 min)
-          return new Promise((resolve) => {
-            const timeout = setTimeout(() => {
+          pendingApprovals.set(requestId, {
+            resolve: (decision) => {
+              clearTimeout(timeout);
               pendingApprovals.delete(requestId);
               updateSessionStatus(channelId, "online");
-              resolve({ behavior: "deny" as const, message: "Approval timed out" });
-            }, 5 * 60 * 1000);
-
-            pendingApprovals.set(requestId, {
-              resolve: (decision) => {
-                clearTimeout(timeout);
-                pendingApprovals.delete(requestId);
-                updateSessionStatus(channelId, "online");
-                resolve(
-                  decision.behavior === "allow"
-                    ? { behavior: "allow" as const, updatedInput: input }
-                    : { behavior: "deny" as const, message: decision.message ?? "Denied by user" },
-                );
-              },
-              channelId,
-            });
+              resolve(
+                decision.behavior === "allow"
+                  ? { behavior: "allow" as const, updatedInput: input }
+                  : { behavior: "deny" as const, message: decision.message ?? "Denied by user" },
+              );
+            },
+            channelId,
           });
-        },
-      })) {
-        // Handle init message
-        if (message.type === "init") {
-          const active = this.sessions.get(channelId);
-          if (active) active.sessionId = message.sessionId;
-          upsertSession(dbId, channelId, message.sessionId, "online");
-          continue;
-        }
+        });
+      },
+    });
+
+    let queryIterator = runQuery(Boolean(resumeSessionId));
+    let attemptedResume = Boolean(resumeSessionId);
+
+    try {
+      retry: while (true) {
+        // Store the active session (update each iteration so Stop button uses current instance)
+        this.sessions.set(channelId, {
+          provider,
+          channelId,
+          sessionId: resumeSessionId ?? null,
+          dbId,
+        });
+
+        try {
+          for await (const message of queryIterator) {
+            // Handle init message
+            if (message.type === "init") {
+              const active = this.sessions.get(channelId);
+              if (active) active.sessionId = message.sessionId;
+              upsertSession(dbId, channelId, message.sessionId, "online");
+              continue;
+            }
 
         // Handle streaming text
         if (message.type === "content") {
@@ -481,49 +488,71 @@ class SessionManager {
           throw new Error(message.message);
         }
       }
-    } catch (error) {
-      // Skip error if result was already delivered (e.g., "Credit balance is too low" + exit code 1)
-      if (hasResult) {
-        console.warn(`[session] Ignoring post-result error for ${channelId}:`, error instanceof Error ? error.message : error);
-        return;
-      }
-      const rawMsg =
-        error instanceof Error ? error.message : "Unknown error occurred";
+      break;
+    } catch (innerError) {
+      // If the resume attempt crashed before any user-visible output, the saved
+      // session_id is likely stale. Silently retry once without resume.
+      const rawMsg = innerError instanceof Error ? innerError.message : String(innerError);
+      const resumeStale =
+        attemptedResume &&
+        !hasTextOutput &&
+        !hasResult &&
+        (rawMsg.includes("process exited with code") ||
+          rawMsg.includes("No conversation found") ||
+          rawMsg.includes("session not found") ||
+          /resume/i.test(rawMsg));
+      if (!resumeStale) throw innerError;
 
-      // Parse API error JSON to show clean message
-      let errMsg = rawMsg;
-      const jsonMatch = rawMsg.match(
-        /API Error: (\d+)\s*(\{.*\})/s,
-      );
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[2]);
-          const statusCode = jsonMatch[1];
-          const message =
-            parsed?.error?.message ?? parsed?.message ?? "Unknown error";
-          errMsg = `API Error ${statusCode}: ${message}. Please try again later.`;
-        } catch (parseErr) {
-          console.warn(`[error-parse] Failed to parse API error JSON for ${channelId}:`, parseErr instanceof Error ? parseErr.message : parseErr);
-          // Fall back to extracting just the status code
-          errMsg = `API Error ${jsonMatch[1]}. Please try again later.`;
-        }
-      } else if (rawMsg.includes("process exited with code")) {
-        errMsg = `${rawMsg}. The server may be temporarily unavailable — please try again later.`;
-      }
+      console.warn(`[session] Resume failed for ${channelId}, retrying without resume:`, rawMsg);
+      upsertSession(dbId, channelId, null, "online");
+      queryIterator = runQuery(false);
+      attemptedResume = false;
+      continue retry;
+    }
+  }
+} catch (error) {
+  // Skip error if result was already delivered (e.g., "Credit balance is too low" + exit code 1)
+  if (hasResult) {
+    console.warn(`[session] Ignoring post-result error for ${channelId}:`, error instanceof Error ? error.message : error);
+    return;
+  }
+  const rawMsg =
+    error instanceof Error ? error.message : "Unknown error occurred";
 
-      // Detect auth/credit errors and suggest re-login
-      const authKeywords = ["credit balance", "not authenticated", "unauthorized", "authentication", "login required", "auth token", "expired", "not logged in", "please run /login"];
-      const lowerMsg = rawMsg.toLowerCase();
-      if (authKeywords.some((kw) => lowerMsg.includes(kw))) {
-        errMsg += L(
-          "\n\n🔑 Claude Code is not logged in. Please open a terminal on the host PC and run `claude login` to authenticate, then try again.",
-          "\n\n🔑 Claude Code 로그인이 필요합니다. 호스트 PC에서 터미널을 열고 `claude login`을 실행하여 인증 후 다시 시도해 주세요.",
-        );
-      }
+  // Parse API error JSON to show clean message
+  let errMsg = rawMsg;
+  const jsonMatch = rawMsg.match(
+    /API Error: (\d+)\s*(\{.*\})/s,
+  );
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[2]);
+      const statusCode = jsonMatch[1];
+      const message =
+        parsed?.error?.message ?? parsed?.message ?? "Unknown error";
+      errMsg = `API Error ${statusCode}: ${message}. Please try again later.`;
+    } catch (parseErr) {
+      console.warn(`[error-parse] Failed to parse API error JSON for ${channelId}:`, parseErr instanceof Error ? parseErr.message : parseErr);
+      // Fall back to extracting just the status code
+      errMsg = `API Error ${jsonMatch[1]}. Please try again later.`;
+    }
+  } else if (rawMsg.includes("process exited with code")) {
+    errMsg = `${rawMsg}. The server may be temporarily unavailable — please try again later.`;
+  }
 
-      await channel.send(`❌ ${errMsg}`);
-      updateSessionStatus(channelId, "offline");
-    } finally {
+  // Detect auth/credit errors and suggest re-login
+  const authKeywords = ["credit balance", "not authenticated", "unauthorized", "authentication", "login required", "auth token", "expired", "not logged in", "please run /login"];
+  const lowerMsg = rawMsg.toLowerCase();
+  if (authKeywords.some((kw) => lowerMsg.includes(kw))) {
+    errMsg += L(
+      "\n\n🔑 Claude Code is not logged in. Please open a terminal on the host PC and run `claude login` to authenticate, then try again.",
+      "\n\n🔑 Claude Code 로그인이 필요합니다. 호스트 PC에서 터미널을 열고 `claude login`을 실행하여 인증 후 다시 시도해 주세요.",
+    );
+  }
+
+  await channel.send(`❌ ${errMsg}`);
+  updateSessionStatus(channelId, "offline");
+} finally {
       clearInterval(heartbeatInterval);
       this.sessions.delete(channelId);
 

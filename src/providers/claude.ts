@@ -1,5 +1,6 @@
 import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
 import path from "node:path";
+import { getConfig } from "../utils/config.js";
 import type { AgentProvider, AgentMessage, QueryOptions, AIProvider } from "./base.js";
 
 export class ClaudeProvider implements AgentProvider {
@@ -21,6 +22,7 @@ export class ClaudeProvider implements AgentProvider {
         // Enable gstack skills
         settingSources: ["user", "project"],
         ...(sessionId ? { resume: sessionId } : {}),
+        ...(getConfig().CLAUDE_MODEL ? { model: getConfig().CLAUDE_MODEL } : {}),
 
         canUseTool: async (
           toolName: string,
@@ -95,8 +97,8 @@ export class ClaudeProvider implements AgentProvider {
       }
 
       // Handle tool start
-      if (message.type === "tool_use") {
-        const toolMsg = message as { name?: string; input?: unknown };
+      if ((message as unknown as { type?: string }).type === "tool_use") {
+        const toolMsg = message as unknown as { name?: string; input?: unknown };
         if (toolMsg.name) {
           yield {
             type: "tool_start",
@@ -108,8 +110,8 @@ export class ClaudeProvider implements AgentProvider {
       }
 
       // Handle tool end
-      if (message.type === "tool_result") {
-        const toolResult = message as { content?: unknown; result?: unknown };
+      if ((message as unknown as { type?: string }).type === "tool_result") {
+        const toolResult = message as unknown as { content?: unknown; result?: unknown };
         yield {
           type: "tool_end",
           result: toolResult.content ?? toolResult.result,
