@@ -1,5 +1,6 @@
 import type { AgentProvider, AgentMessage, QueryOptions, AIProvider } from "./base.js";
 import { getChannelConfig } from "../db/database.js";
+import { getConfig } from "../utils/config.js";
 import path from "node:path";
 
 export class CodexProvider implements AgentProvider {
@@ -41,6 +42,7 @@ export class CodexProvider implements AgentProvider {
 
       // Start or resume thread
       // sandboxMode: danger-full-access disables sandboxing entirely (use with caution)
+      const codexModel = getConfig().CODEX_MODEL;
       const thread = sessionId
         ? codex.resumeThread(sessionId, {
             workingDirectory: cwd,
@@ -49,6 +51,7 @@ export class CodexProvider implements AgentProvider {
             sandboxMode: "danger-full-access",
             networkAccessEnabled: true,
             additionalDirectories: additionalDirs,
+            ...(codexModel ? { model: codexModel } : {}),
           })
         : codex.startThread({
             workingDirectory: cwd,
@@ -57,6 +60,7 @@ export class CodexProvider implements AgentProvider {
             sandboxMode: "danger-full-access",
             networkAccessEnabled: true,
             additionalDirectories: additionalDirs,
+            ...(codexModel ? { model: codexModel } : {}),
           });
 
       // Yield init message with thread ID
