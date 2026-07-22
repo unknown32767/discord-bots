@@ -23,6 +23,7 @@ export class ClaudeProvider implements AgentProvider {
         settingSources: ["user", "project"],
         ...(sessionId ? { resume: sessionId } : {}),
         ...(getConfig().CLAUDE_MODEL ? { model: getConfig().CLAUDE_MODEL } : {}),
+        ...(getConfig().CLAUDE_EFFORT ? { effort: getConfig().CLAUDE_EFFORT } : {}),
 
         canUseTool: async (
           toolName: string,

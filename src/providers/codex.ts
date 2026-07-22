@@ -43,6 +43,7 @@ export class CodexProvider implements AgentProvider {
       // Start or resume thread
       // sandboxMode: danger-full-access disables sandboxing entirely (use with caution)
       const codexModel = getConfig().CODEX_MODEL;
+      const codexReasoningEffort = getConfig().CODEX_REASONING_EFFORT;
       const thread = sessionId
         ? codex.resumeThread(sessionId, {
             workingDirectory: cwd,
@@ -52,6 +53,7 @@ export class CodexProvider implements AgentProvider {
             networkAccessEnabled: true,
             additionalDirectories: additionalDirs,
             ...(codexModel ? { model: codexModel } : {}),
+            ...(codexReasoningEffort ? { modelReasoningEffort: codexReasoningEffort } : {}),
           })
         : codex.startThread({
             workingDirectory: cwd,
@@ -61,6 +63,7 @@ export class CodexProvider implements AgentProvider {
             networkAccessEnabled: true,
             additionalDirectories: additionalDirs,
             ...(codexModel ? { model: codexModel } : {}),
+            ...(codexReasoningEffort ? { modelReasoningEffort: codexReasoningEffort } : {}),
           });
 
       // Yield init message with thread ID

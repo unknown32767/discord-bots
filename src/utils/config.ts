@@ -21,10 +21,18 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.length > 0 ? v : undefined)),
+  CLAUDE_EFFORT: z
+    .enum(["low", "medium", "high", "xhigh", "max", "ultra"])
+    .optional()
+    .transform((v) => (v === "ultra" ? "xhigh" : v)),
   CODEX_MODEL: z
     .string()
     .optional()
     .transform((v) => (v && v.length > 0 ? v : undefined)),
+  CODEX_REASONING_EFFORT: z
+    .enum(["minimal", "low", "medium", "high", "xhigh", "ultra"])
+    .optional()
+    .transform((v) => (v === "ultra" ? "xhigh" : v)),
 });
 
 export type Config = z.infer<typeof envSchema>;
