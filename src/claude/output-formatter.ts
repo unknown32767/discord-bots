@@ -279,7 +279,7 @@ export function createAskUserQuestionEmbed(
   return { embed, components };
 }
 
-const MAX_EMBED_DESCRIPTION_LENGTH = 4000; // Leave some buffer from 4096 limit
+const MAX_EMBED_DESCRIPTION_LENGTH = 1900; // Allows ~3 embeds per message under Discord's 6000-char limit
 
 export function createResultEmbeds(
   result: string,

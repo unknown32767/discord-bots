@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TextChannel } from "discord.js";
+import type { TextChannel, EmbedBuilder } from "discord.js";
 import {
   upsertSession,
   updateSessionStatus,
@@ -49,6 +49,19 @@ const pendingQuestions = new Map<
 
 // Pending custom text inputs: channelId -> requestId
 const pendingCustomInputs = new Map<string, { requestId: string }>();
+
+// Discord enforces a 6000-character limit across all embeds in a single message.
+// Use 5500 to leave headroom for timestamps and future fields.
+const MAX_TOTAL_EMBED_SIZE = 5500;
+
+function embedSize(embed: EmbedBuilder): number {
+  const json = embed.toJSON();
+  return (
+    (json.title?.length ?? 0) +
+    (json.description?.length ?? 0) +
+    (json.footer?.text?.length ?? 0)
+  );
+}
 
 class SessionManager {
   private sessions = new Map<string, ActiveSession>();
@@ -463,9 +476,25 @@ class SessionManager {
             getConfig().SHOW_COST,
           );
 
-          // Send embeds in batches (Discord allows up to 10 embeds per message)
-          for (let i = 0; i < resultEmbeds.length; i += 10) {
-            const batch = resultEmbeds.slice(i, i + 10);
+          // Send embeds in batches limited by Discord's 6000-character total embed size.
+          // Discord also allows up to 10 embeds per message; we enforce both.
+          let batch: EmbedBuilder[] = [];
+          let batchSize = 0;
+
+          for (const embed of resultEmbeds) {
+            const size = embedSize(embed);
+            if (
+              batch.length >= 10 ||
+              (batch.length > 0 && batchSize + size > MAX_TOTAL_EMBED_SIZE)
+            ) {
+              await channel.send({ embeds: batch });
+              batch = [];
+              batchSize = 0;
+            }
+            batch.push(embed);
+            batchSize += size;
+          }
+          if (batch.length > 0) {
             await channel.send({ embeds: batch });
           }
 
