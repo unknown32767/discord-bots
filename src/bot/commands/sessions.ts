@@ -239,6 +239,7 @@ async function getCodexFirstMessage(filePath: string): Promise<{ text: string; t
 
   let timestamp = "";
   let text = "";
+  let summaryText = "";
 
   for await (const line of rl) {
     try {
@@ -278,12 +279,12 @@ async function getCodexFirstMessage(filePath: string): Promise<{ text: string; t
         }
       }
 
-      // Third option: turn_context summary (rarely has actual user message)
-      if (!text && entry.type === "turn_context" && entry.payload?.summary) {
+      // Last resort: turn_context summary. Ignore "auto"/"none" and keep
+      // scanning so a later user_message can still take precedence.
+      if (!summaryText && entry.type === "turn_context" && entry.payload?.summary) {
         const summary = entry.payload.summary;
-        if (summary && summary !== "none" && summary.trim()) {
-          text = summary;
-          break;
+        if (summary && summary !== "none" && summary !== "auto" && summary.trim()) {
+          summaryText = summary;
         }
       }
     } catch {
@@ -294,7 +295,7 @@ async function getCodexFirstMessage(filePath: string): Promise<{ text: string; t
   rl.close();
   stream.destroy();
 
-  return { text: text || "(empty session)", timestamp };
+  return { text: text || summaryText || "(empty session)", timestamp };
 }
 
 /**
