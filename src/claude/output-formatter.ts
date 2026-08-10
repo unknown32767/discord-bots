@@ -14,6 +14,96 @@ export function formatStreamChunk(text: string): string {
   return text.slice(0, MAX_DISCORD_LENGTH) + "\n" + L("... (truncated)", "... (잘림)");
 }
 
+interface OpenFence {
+  marker: string; // "```" or "~~~"
+  lang: string;
+}
+
+interface MarkdownState {
+  openFence: OpenFence | null;
+  openInline: string[]; // e.g. ["**", "`"]
+}
+
+function toggleMarker(stack: string[], marker: string): void {
+  const idx = stack.lastIndexOf(marker);
+  if (idx !== -1) {
+    stack.splice(idx, 1);
+  } else {
+    stack.push(marker);
+  }
+}
+
+/**
+ * Scan a chunk and figure out which markdown constructs are still open at the
+ * end. Code fences are only recognized at the start of a line; everything
+ * inside an open fence is ignored so markers in code samples are not counted.
+ */
+function analyzeMarkdown(text: string): MarkdownState {
+  const state: MarkdownState = { openFence: null, openInline: [] };
+  let i = 0;
+  const n = text.length;
+
+  while (i < n) {
+    // Code fences must start at the beginning of a line
+    if (
+      (text.startsWith("```", i) || text.startsWith("~~~", i)) &&
+      (i === 0 || text[i - 1] === "\n")
+    ) {
+      const marker = text.slice(i, i + 3);
+      if (state.openFence?.marker === marker) {
+        state.openFence = null;
+      } else if (!state.openFence) {
+        const lineEnd = text.indexOf("\n", i);
+        const lang = text.slice(i + 3, lineEnd === -1 ? n : lineEnd).trim();
+        state.openFence = { marker, lang };
+      }
+      i += 3;
+      continue;
+    }
+
+    if (state.openFence) {
+      i++;
+      continue;
+    }
+
+    // Skip escaped characters so \* and \` are not treated as markers
+    if (text[i] === "\\") {
+      i += 2;
+      continue;
+    }
+
+    // Inline code toggle
+    if (text[i] === "`") {
+      toggleMarker(state.openInline, "`");
+      i++;
+      continue;
+    }
+
+    // While inside an inline code span, ignore every other marker
+    if (state.openInline.includes("`")) {
+      i++;
+      continue;
+    }
+
+    // Multi-character markers (single * and _ are intentionally ignored to
+    // avoid false positives with multiplication and snake_case)
+    let matched = false;
+    for (const m of ["**", "__", "~~", "||"]) {
+      if (text.startsWith(m, i)) {
+        toggleMarker(state.openInline, m);
+        i += m.length;
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+
+    i++;
+  }
+
+  return state;
+}
+
 export function splitMessage(text: string): string[] {
   const chunks: string[] = [];
   let remaining = text;
@@ -33,26 +123,19 @@ export function splitMessage(text: string): string[] {
     let chunk = remaining.slice(0, splitAt);
     remaining = remaining.slice(splitAt);
 
-    // Check if we're splitting inside an unclosed code block
-    const fenceRegex = /^```/gm;
-    let insideBlock = false;
-    let blockLang = "";
-    let match;
-    while ((match = fenceRegex.exec(chunk)) !== null) {
-      if (insideBlock) {
-        insideBlock = false;
-        blockLang = "";
-      } else {
-        insideBlock = true;
-        const lineEnd = chunk.indexOf("\n", match.index);
-        blockLang = chunk.slice(match.index + 3, lineEnd === -1 ? undefined : lineEnd).trim();
-      }
+    const md = analyzeMarkdown(chunk);
+
+    // Close an unclosed code block in this chunk, reopen in the next
+    if (md.openFence) {
+      chunk += "\n" + md.openFence.marker;
+      remaining = md.openFence.marker + md.openFence.lang + "\n" + remaining;
     }
 
-    if (insideBlock) {
-      // Close the code block in this chunk, reopen in the next
-      chunk += "\n```";
-      remaining = "```" + blockLang + "\n" + remaining;
+    // Close unclosed inline markdown (bold, underline, strikethrough, spoiler,
+    // inline code) so Discord doesn't render the rest of the chunk as plain text
+    if (md.openInline.length > 0) {
+      chunk += [...md.openInline].reverse().join("");
+      remaining = md.openInline.join("") + remaining;
     }
 
     chunks.push(chunk);

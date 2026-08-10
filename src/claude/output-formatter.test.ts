@@ -121,6 +121,32 @@ describe("splitMessage", () => {
     expect(chunks.length).toBe(2);
     expect(chunks[0]).toBe("a".repeat(1500));
   });
+
+  it("closes and reopens bold markers across splits", () => {
+    const text = "**" + "a".repeat(1895) + "b".repeat(100) + "**";
+    const chunks = splitMessage(text);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    expect(chunks[0]).toMatch(/\*\*$/);
+    expect(chunks[1]).toMatch(/^\*\*/);
+  });
+
+  it("closes and reopens inline code across splits", () => {
+    const text = "`" + "a".repeat(1898) + "b".repeat(50) + "`";
+    const chunks = splitMessage(text);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    expect(chunks[0]).toMatch(/`$/);
+    expect(chunks[1]).toMatch(/^`/);
+  });
+
+  it("does not close markers that are inside a code block", () => {
+    const code = "**not bold**\n" + "x".repeat(1900);
+    const text = "```\n" + code + "\n```";
+    const chunks = splitMessage(text);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    // Chunk ends inside the code block: only the fence is closed, not the **
+    expect(chunks[0]).toMatch(/```$/);
+    expect(chunks[0]).not.toMatch(/\*\*```$/);
+  });
 });
 
 // ─── createToolApprovalEmbed ───
