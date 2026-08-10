@@ -10,6 +10,8 @@ import {
   splitMessage,
   createToolApprovalEmbed,
   createResultEmbed,
+  createResultEmbeds,
+  createThinkingEmbed,
   createAskUserQuestionEmbed,
   createStopButton,
   createCompletedButton,
@@ -233,6 +235,47 @@ describe("createResultEmbed", () => {
   it("truncates very long result text to 4000 chars", () => {
     const embed = createResultEmbed("x".repeat(5000), 0, 0);
     expect(embed.data.description!.length).toBeLessThanOrEqual(4000);
+  });
+
+  it("closes code fences in every embed when a result spans multiple pages", () => {
+    const result = "```text\n" + "x".repeat(1900) + "\n```";
+    const embeds = createResultEmbeds(result, 0, 1000, false);
+    expect(embeds.length).toBeGreaterThanOrEqual(2);
+    for (const embed of embeds) {
+      const desc = embed.data.description ?? "";
+      const fences = (desc.match(/^```/gm) || []).length;
+      expect(fences % 2).toBe(0);
+    }
+  });
+
+  it("keeps an empty fenced block with language intact across pages", () => {
+    const result = "a".repeat(1500) + "\n```text\n```\n" + "b".repeat(800);
+    const embeds = createResultEmbeds(result, 0, 1000, false);
+    for (const embed of embeds) {
+      const desc = embed.data.description ?? "";
+      const fences = (desc.match(/^```/gm) || []).length;
+      expect(fences % 2).toBe(0);
+    }
+  });
+});
+
+// ─── createThinkingEmbed ───
+
+describe("createThinkingEmbed", () => {
+  it("closes an open code fence when truncating", () => {
+    const text = "```text\n" + "x".repeat(5000);
+    const embed = createThinkingEmbed(text);
+    const desc = embed.data.description ?? "";
+    const fences = (desc.match(/^```/gm) || []).length;
+    expect(fences % 2).toBe(0);
+    expect(desc).toContain("...");
+  });
+
+  it("closes open bold when truncating", () => {
+    const text = "**" + "x".repeat(5000);
+    const embed = createThinkingEmbed(text);
+    const desc = embed.data.description ?? "";
+    expect((desc.match(/\*\*/g) || []).length % 2).toBe(0);
   });
 });
 

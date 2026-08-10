@@ -362,8 +362,6 @@ export function createAskUserQuestionEmbed(
   return { embed, components };
 }
 
-const MAX_EMBED_DESCRIPTION_LENGTH = 1900; // Allows ~3 embeds per message under Discord's 6000-char limit
-
 export function createResultEmbeds(
   result: string,
   costUsd: number,
@@ -377,14 +375,12 @@ export function createResultEmbeds(
 
   const embeds: EmbedBuilder[] = [];
 
-  // Split result into chunks
-  let remaining = result;
-  let pageNum = 1;
+  // Split with markdown awareness so code fences (```text, etc.) and inline
+  // markers are properly closed in one page and reopened in the next.
+  const textChunks = splitMessage(result);
 
-  while (remaining.length > 0) {
-    const chunk = remaining.slice(0, MAX_EMBED_DESCRIPTION_LENGTH);
-    remaining = remaining.slice(MAX_EMBED_DESCRIPTION_LENGTH);
-
+  textChunks.forEach((chunk, index) => {
+    const pageNum = index + 1;
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
       .setTimestamp();
@@ -403,8 +399,7 @@ export function createResultEmbeds(
     }
 
     embeds.push(embed);
-    pageNum++;
-  }
+  });
 
   // Handle empty result
   if (embeds.length === 0) {
@@ -432,7 +427,16 @@ export function createResultEmbed(
 }
 
 export function createThinkingEmbed(text: string): EmbedBuilder {
-  const truncated = text.length > 4000 ? text.slice(0, 4000) + "..." : text;
+  let truncated = text;
+  if (truncated.length > 4000) {
+    truncated = truncated.slice(0, 4000);
+    // Close any markdown constructs left open by the hard cut so the embed
+    // doesn't render the remainder as code/plain text
+    const md = analyzeMarkdown(truncated);
+    if (md.openFence) truncated += "\n" + md.openFence.marker;
+    if (md.openInline.length > 0) truncated += [...md.openInline].reverse().join("");
+    truncated += "...";
+  }
   return new EmbedBuilder()
     .setTitle(L("💭 Reasoning", "💭 추론 과정"))
     .setDescription(truncated)
