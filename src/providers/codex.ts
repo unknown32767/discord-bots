@@ -3,12 +3,15 @@ import { getChannelConfig } from "../db/database.js";
 import { getConfig } from "../utils/config.js";
 import path from "node:path";
 
+// Image formats supported by Codex local_image input (gif excluded - passed as path text only)
+const CODEX_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+
 export class CodexProvider implements AgentProvider {
   readonly name: AIProvider = "codex";
   private abortController: AbortController | null = null;
 
   async *query(options: QueryOptions): AsyncIterable<AgentMessage> {
-    const { prompt, cwd, channelId, sessionId } = options;
+    const { prompt, cwd, channelId, sessionId, imagePaths } = options;
 
     this.abortController = new AbortController();
 
@@ -72,7 +75,18 @@ export class CodexProvider implements AgentProvider {
       }
 
       // Run the turn
-      const turn = await thread.runStreamed(prompt, {
+      // Attach images as local_image inputs so the model can actually see them.
+      // Paths are resolved to absolute (project_path from /register may be relative).
+      const images = (imagePaths ?? [])
+        .filter((p) => CODEX_IMAGE_EXTS.has(path.extname(p).toLowerCase()))
+        .map((p) => ({ type: "local_image" as const, path: path.resolve(cwd, p) }));
+
+      const input =
+        images.length > 0
+          ? [{ type: "text" as const, text: prompt }, ...images]
+          : prompt;
+
+      const turn = await thread.runStreamed(input, {
         signal: this.abortController.signal,
       });
 

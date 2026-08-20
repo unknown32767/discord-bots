@@ -121,11 +121,22 @@ export async function handleMessage(message: Message): Promise<void> {
     await message.reply(skippedMessages.join("\n"));
   }
 
+  const providerName = project.provider ?? "claude";
+
   if (imagePaths.length > 0) {
-    prompt += `\n\n[Attached images - use Read tool to view these files]\n${imagePaths.join("\n")}`;
+    if (providerName === "codex") {
+      // Codex receives images directly as local_image inputs; paths are listed for reference
+      prompt += `\n\n[Attached images - provided as image inputs; local paths]\n${imagePaths.join("\n")}`;
+    } else {
+      prompt += `\n\n[Attached images - use Read tool to view these files]\n${imagePaths.join("\n")}`;
+    }
   }
   if (filePaths.length > 0) {
-    prompt += `\n\n[Attached files - use Read tool to read these files]\n${filePaths.join("\n")}`;
+    if (providerName === "codex") {
+      prompt += `\n\n[Attached files - these files are available in the project directory, read them with shell tools]\n${filePaths.join("\n")}`;
+    } else {
+      prompt += `\n\n[Attached files - use Read tool to read these files]\n${filePaths.join("\n")}`;
+    }
   }
 
   if (!prompt) return;
@@ -143,7 +154,7 @@ export async function handleMessage(message: Message): Promise<void> {
       return;
     }
 
-    sessionManager.setPendingQueue(message.channelId, channel, prompt);
+    sessionManager.setPendingQueue(message.channelId, channel, prompt, imagePaths);
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
@@ -166,5 +177,5 @@ export async function handleMessage(message: Message): Promise<void> {
   }
 
   // Send message to Claude session
-  await sessionManager.sendMessage(channel, prompt);
+  await sessionManager.sendMessage(channel, prompt, imagePaths);
 }

@@ -14,6 +14,7 @@ export interface QueryOptions {
   channelId?: string; // For per-channel configuration (e.g., additionalDirectories for Codex)
   sessionId?: string;
   mode?: 'default' | 'plan';
+  imagePaths?: string[]; // Local image file paths attached by the user (Codex: sent as local_image input)
   onToolRequest?: (toolName: string, input: Record<string, unknown>) => Promise<ToolDecision>;
 }
 

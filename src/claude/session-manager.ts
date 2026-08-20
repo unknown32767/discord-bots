@@ -63,15 +63,22 @@ function embedSize(embed: EmbedBuilder): number {
   );
 }
 
+interface QueuedMessage {
+  channel: TextChannel;
+  prompt: string;
+  imagePaths?: string[];
+}
+
 class SessionManager {
   private sessions = new Map<string, ActiveSession>();
   private static readonly MAX_QUEUE_SIZE = 5;
-  private messageQueue = new Map<string, { channel: TextChannel; prompt: string }[]>();
-  private pendingQueuePrompts = new Map<string, { channel: TextChannel; prompt: string }>();
+  private messageQueue = new Map<string, QueuedMessage[]>();
+  private pendingQueuePrompts = new Map<string, QueuedMessage>();
 
   async sendMessage(
     channel: TextChannel,
     prompt: string,
+    imagePaths?: string[],
   ): Promise<void> {
     const channelId = channel.id;
     const project = getProject(channelId);
@@ -147,6 +154,7 @@ class SessionManager {
       channelId,
       sessionId: useResume ? resumeSessionId : undefined,
       mode: project.mode ?? "default",
+      imagePaths,
       onToolRequest: async (toolName: string, input: Record<string, unknown>) => {
         toolUseCount++;
 
@@ -605,7 +613,7 @@ class SessionManager {
           ? L(`📨 Processing queued message... (remaining: ${remaining})\n> ${preview}`, `📨 대기 중이던 메시지를 처리합니다... (남은 큐: ${remaining}개)\n> ${preview}`)
           : L(`📨 Processing queued message...\n> ${preview}`, `📨 대기 중이던 메시지를 처리합니다...\n> ${preview}`);
         channel.send(msg).catch(() => {});
-        this.sendMessage(next.channel, next.prompt).catch((err) => {
+        this.sendMessage(next.channel, next.prompt, next.imagePaths).catch((err) => {
           console.error("Queue sendMessage error:", err);
         });
       }
@@ -689,8 +697,8 @@ class SessionManager {
 
   // --- Message queue ---
 
-  setPendingQueue(channelId: string, channel: TextChannel, prompt: string): void {
-    this.pendingQueuePrompts.set(channelId, { channel, prompt });
+  setPendingQueue(channelId: string, channel: TextChannel, prompt: string, imagePaths?: string[]): void {
+    this.pendingQueuePrompts.set(channelId, { channel, prompt, imagePaths });
   }
 
   confirmQueue(channelId: string): boolean {
@@ -720,7 +728,7 @@ class SessionManager {
     return this.pendingQueuePrompts.has(channelId);
   }
 
-  getQueue(channelId: string): { channel: TextChannel; prompt: string }[] {
+  getQueue(channelId: string): QueuedMessage[] {
     return this.messageQueue.get(channelId) ?? [];
   }
 
